@@ -4,6 +4,7 @@
   1. User is gonna create an account using 'username', 'password' and 'desctruction_password'. No other verification is needed.
   2. User can log into account using 'username' and 'password'. If user enters 'destruction_password', then their account gets deleted immediately.
   3. User must login once in a month, otherwiser their account gets deleted.
+  4. Deletion of an account of particular user will result into deletion of chat, contact info, hosted files and generated keys (PGP and file encryption keys).
 
 ## File Hosting Related :
   1. User can host a file, encrypted with 'Fernet' encryption (32byte/256bits key will be generated for decryption).
