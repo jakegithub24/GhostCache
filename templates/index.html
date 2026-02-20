@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}Home - GhostCache{% endblock %}
+
+{% block content %}
+    {% if user %}
+        <h2>Welcome, {{ user.username }}!</h2>
+        <p>Last login: {{ user.last_login }}</p>
+        <p><a href="{{ url_for('connect') }}">Send connection request</a> | <a href="{{ url_for('connections') }}">Manage connections</a></p>
+        <form method="post" action="{{ url_for('delete_account') }}" onsubmit="return confirm('Are you sure you want to delete your account?');">
+            <button type="submit" class="danger">Delete Account</button>
+        </form>
+    {% else %}
+        <h2>Welcome to GhostCache</h2>
+        <p>Please <a href="{{ url_for('login') }}">login</a> or <a href="{{ url_for('register') }}">register</a> to continue.</p>
+    {% endif %}
+{% endblock %}

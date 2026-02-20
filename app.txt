@@ -1,0 +1,86 @@
+from flask import Flask, request
+
+app = Flask(__name__)
+
+
+# Cyptograhic key generation logic
+
+Encrypted_Connection_Key = fernet.generatekey(random)
+
+SaltNumber = rand(0, 9)
+
+SaltedKey = SaltNumber(Encrypted_Connection_Key)
+
+
+# time (key update) logic
+# 'SaltNumber' changes every 10 mintutes
+# 'Encrypted_Connection_Key' will get replaced by new randomly generated key
+
+
+# User logic
+# User is gonna create an account using 'username', 'password', 'd_pass'(destruction password)
+# User is gonna login using 'username' and 'password'
+# User can deleted his account by entering 'd_pass'
+
+
+@app.route('/')
+def index():
+	return "Hello Flask!"
+
+@app.route('/register', methods=["POST"])
+def user_register():
+	if form.method == "POST":
+		store_in_db.username = form.get(data['username'])
+		store_in_db.password = salt(hash(form.get(data['password'])))
+		store_in_db.d_pass = salt(hash(form.get(data['d_pass'])))
+
+		keys_database_key = fernet.keygen(rand)
+	else:
+		return redirect(url_for('index'))
+
+
+@app.route('/login', methods=["POST"])
+def user_login():
+	if form.method == "POST":
+		if (form.get(data['username']) == present_in_db.username && salt(hash(form.get(data['password']))) == present_in_db.password):
+			session.user.login(username)
+		elif (form.get(data['username']) == present_in_db.username && salt(hash(form.get(data['d_pass']))) == present_in_db.d_pass):
+			accountDelete(form.get(data['username']))
+		else :
+			return "Invalid credentials"
+
+
+@app.route('/logout')
+def user_logout():
+	session.logout(username)
+
+@app.route('/delete_account', methods="POST")
+def user_delete_account():
+	deleteAccount(session.username)
+	# Delete everything like chats, messages to others, hosted files and all.
+
+@app.route('/conn_request/<sender>/<reciever>', methods=["POST"])
+def user_connection_request(sender: str, reciever:str):
+	if (sender == session.username):
+		# Make connection requrest to 'reciever'
+		if (reciever == 'accepts the request') :
+			user1_keys[1] = username.keys_database_key.encrypt((rsa_keygen(private_key)))
+			user1_keys[2] = username.keys_database_key.encrypt((rsa_keygen(public_key)))
+			user2_keys[1] = username.keys_database_key.encrypt((rsa_keygen(private_key)))
+			user2_keys[2] = username.keys_database_key.encrypt((rsa_keygen(public_key)))
+			# 'Even' index in database are for 'private_key'
+			# 'Odd' index in database are for 'public_key'
+			connection_Key_Exchange(user1_keys[2], user2_keys[2]):
+				# user1's public key gets added to user2's contact list. It should be transfered as hash, but stored as hash of user2's fernet encryption.
+				# user2's public key gets added to 'user1' contact list. It should be transfered as hash, but stored as hash of user1's fernet encryption.
+		elif (reciever == 'denies the request') :
+			# reciever's profile gets hidden to sender. Sender will not be able to find reciever's profile ever again. (vice verca, reciever also will not be able to find sender's sender's profile)
+			
+			
+	else :
+		return "Invalid request, login first!"
+	
+
+
+if __name__ == "__main__":
+	app.run(port=5500)

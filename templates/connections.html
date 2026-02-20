@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Your Connections{% endblock %}
+
+{% block content %}
+    <h2>Pending requests you've sent</h2>
+    {% if pending_sent %}
+        <ul>
+        {% for item in pending_sent %}
+            <li>{{ item.other.username }} (pending)</li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p>None</p>
+    {% endif %}
+
+    <h2>Pending requests you've received</h2>
+    {% if pending_recv %}
+        <ul>
+        {% for item in pending_recv %}
+            <li>{{ item.other.username }}
+                <form method="post" action="{{ url_for('accept_connection', conn_id=item.conn.id) }}" style="display:inline;">
+                    <button type="submit">Accept</button>
+                </form>
+                <form method="post" action="{{ url_for('deny_connection', conn_id=item.conn.id) }}" style="display:inline;">
+                    <button type="submit">Deny</button>
+                </form>
+            </li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p>None</p>
+    {% endif %}
+
+    <h2>Accepted connections</h2>
+    {% if accepted %}
+        <ul>
+        {% for item in accepted %}
+            <li><a href="{{ url_for('chat_page', other_id=item.other.id) }}">Chat with {{ item.other.username }}</a></li>
+        {% endfor %}
+        </ul>
+    {% else %}
+        <p>None</p>
+    {% endif %}
+{% endblock %}

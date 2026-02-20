@@ -1,0 +1,6 @@
+Flask>=2.0
+Flask-SQLAlchemy
+argon2-cffi
+cryptography
+stem
+# add any other dependencies your app uses

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Search Users{% endblock %}
+
+{% block content %}
+    <h2>Search for users</h2>
+    <form method="get" action="{{ url_for('search_users') }}">
+        <input type="text" name="q" value="{{ query }}" placeholder="username">
+        <button type="submit">Search</button>
+    </form>
+    {% if results %}
+        <ul>
+        {% for u in results %}
+            <li>{{ u.username }} 
+                <form method="post" action="{{ url_for('send_connection_request') }}" style="display:inline;">
+                    <input type="hidden" name="username" value="{{ u.username }}">
+                    <button type="submit">Connect</button>
+                </form>
+            </li>
+        {% endfor %}
+        </ul>
+    {% elif query %}
+        <p>No users found matching '{{ query }}'</p>
+    {% endif %}
+{% endblock %}

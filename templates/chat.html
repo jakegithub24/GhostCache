@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}Chat with {{ other_id }}{% endblock %}
+
+{% block content %}
+    <h2>Chat with {{ other_id }}</h2>
+    <div class="chat-window">
+        {% for m in messages %}
+            <div class="msg {{ 'sent' if m.sender_id == session.user_id else 'recv' }}">
+                <span class="who">{{ 'You' if m.sender_id == session.user_id else other_id }}:</span>
+                <span class="text">{{ m.content }}</span>
+                <span class="ts">{{ m.timestamp }}</span>
+            </div>
+        {% endfor %}
+    </div>
+    <form method="post" action="{{ url_for('chat_page', other_id=other_id) }}">
+        <input type="text" name="message" placeholder="Type a message..." required>
+        <button type="submit">Send</button>
+    </form>
+{% endblock %}
