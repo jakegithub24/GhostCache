@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block title %}Send Connection Request{% endblock %}
+
+{% block content %}
+    <h2>Send a connection request</h2>
+    <form method="post" action="{{ url_for('send_connection_request') }}">
+        <label for="username">Username of recipient</label>
+        <input type="text" name="username" id="username" required>
+        <button type="submit">Send request</button>
+    </form>
+{% endblock %}

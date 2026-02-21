@@ -1,15 +1,8 @@
-# stem is optional; the application can operate without a Tor control connection
-try:
-    from argon2.exceptions import VerifyMismatchError
-    from argon2 import PasswordHasher
-    from stem.connection import AuthenticationFailure, authenticate_cookie
-    from stem.control import Controller
-except ImportError:  # pragma: no cover - dependencies missing during tests
-    AuthenticationFailure = Exception
-    def authenticate_cookie(controller, path): return None
-    Controller = None
+# GhostCache — surface-web (non-Tor) variant for local/testing use.
+# No Tor or stem dependency; runs as a normal Flask app.
 
-import base64
+from argon2.exceptions import VerifyMismatchError
+from argon2 import PasswordHasher
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.fernet import Fernet
@@ -34,60 +27,6 @@ UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# --- Tor Connection Logic ---
-# This function will connect to the system's Tor control port
-
-
-def connect_to_tor():
-    """Connect to a local Tor control socket and create an ephemeral hidden service.
-    The function sets ``app.tor_service`` so that callers can later remove the
-    service if needed.  It **does not** start the Flask server itself; the
-    caller is responsible for invoking ``app.run`` so that the controller
-    context is not held for the duration of the HTTP server.
-    If the `stem` package or controller functionality is unavailable the
-    call becomes a no-op and the application will still run in "non-Tor"
-    mode.
-    """
-
-    if Controller is None:
-        print("stem library not available; skipping Tor connection.")
-        return
-
-    socket_path = "/var/run/tor/control"
-    try:
-        print(f"Connecting to Tor control socket at {socket_path}...")
-        # Use Controller.from_socket_file instead of Controller.from_port
-        with Controller.from_socket_file(path=socket_path) as controller:
-            print("Successfully connected to Tor control socket.")
-            try:
-                controller.authenticate()  # Try authenticating without a cookie first for sockets
-                print("Successfully authenticated with Tor.")
-            except AuthenticationFailure:
-                print("Simple authentication failed, trying cookie...")
-                cookie_path = "/var/lib/tor/control_auth_cookie"
-                authenticate_cookie(controller, cookie_path)
-                print("Successfully authenticated with Tor using cookie.")
-
-            tor_version = controller.get_version()
-            print(f"Connected to Tor version: {tor_version}")
-
-            # Create a hidden service
-            print("Creating hidden service...")
-            service = controller.create_ephemeral_hidden_service(
-                {80: 5000},  # Map onion port 80 to local port 5000
-                await_publication=True  # Wait for the service to be published
-            )
-
-            onion_host = service.service_id + ".onion"
-            print(f"Hidden service available at: http://{onion_host}")
-
-            # Store the service so we can close it later
-            app.tor_service = service
-    except Exception as e:
-        print(f"Could not connect to Tor control socket: {e}")
-        print("Is Tor running? Are you running this script with 'sudo' in Tails?")
-
-
 # perform housekeeping on every request
 @app.before_request
 def cleanup():
@@ -100,7 +39,6 @@ def cleanup():
         except Exception:
             pass
         db.session.delete(f)
-    # optionally: remove users inactive over 30 days? already done on login
     db.session.commit()
 
 # --- Database Models ---
@@ -110,14 +48,12 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)  # Argon2 hash
-    # Argon2 hash of destruction password
     dpass_hash = db.Column(db.String(200), nullable=False)
     keys_database_key = db.Column(
         db.String(200), nullable=False)  # Fernet key (base64)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_login = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # relationships for cascade deletion
     sent_connections = db.relationship('Connection',
                                        foreign_keys='Connection.sender_id',
                                        cascade='all, delete-orphan')
@@ -148,14 +84,12 @@ class Connection(db.Model):
     sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     receiver_id = db.Column(
         db.Integer, db.ForeignKey('user.id'), nullable=False)
-    # pending, accepted, denied
     status = db.Column(db.String(20), default='pending')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     sender_privkey_enc = db.Column(db.Text, nullable=True)
     sender_pubkey_enc = db.Column(db.Text, nullable=True)
     receiver_privkey_enc = db.Column(db.Text, nullable=True)
     receiver_pubkey_enc = db.Column(db.Text, nullable=True)
-    # symmetric chat key encrypted for each participant
     chat_key_enc_sender = db.Column(db.Text, nullable=True)
     chat_key_enc_receiver = db.Column(db.Text, nullable=True)
 
@@ -198,7 +132,6 @@ class Blacklist(db.Model):
 
 
 class Message(db.Model):
-    """Simple queue table for user-to-user chat messages."""
     id = db.Column(db.Integer, primary_key=True)
     sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     receiver_id = db.Column(
@@ -209,28 +142,18 @@ class Message(db.Model):
 
 # --- Utility Functions ---
 
-
-# password handling using argon2-cffi's high level API
-
-# create a single PasswordHasher instance; it will generate its own salts
 ph = PasswordHasher()
 
 
 def hash_password(password: str) -> str:
-    """Hash a plaintext password and return the encoded string."""
-    # PasswordHasher handles encoding to bytes internally
     return ph.hash(password)
 
 
 def verify_password(hash_str: str, password: str) -> bool:
-    """Return True if ``password`` matches the hashed value, False otherwise."""
     try:
         return ph.verify(hash_str, password)
     except VerifyMismatchError:
         return False
-
-# the original generate_salt helper is no longer needed, but keep it for
-# compatibility in case some other code calls it.
 
 
 def generate_salt(length=16):
@@ -275,15 +198,10 @@ def generate_rsa_keypair():
 
 @app.route('/')
 def index():
-    """Landing page.
-    Shows different content depending on whether the user is logged in.
-    """
     user = None
     if 'user_id' in session:
         user = User.query.get(session['user_id'])
     return render_template('index.html', user=user)
-
-# make user_id available in template session object
 
 
 @app.context_processor
@@ -296,7 +214,8 @@ def register():
     if request.method == 'GET':
         return render_template('register.html')
 
-    data = request.get_json() or request.form
+    j = request.get_json(silent=True)
+    data = j or request.form
     username = data.get('username')
     password = data.get('password')
     d_pass = data.get('d_pass')
@@ -311,7 +230,6 @@ def register():
 
     pwd_hash = hash_password(password)
     dpass_hash = hash_password(d_pass)
-
     keys_db_key = generate_fernet_key()
 
     user = User(
@@ -333,7 +251,8 @@ def login():
     if request.method == 'GET':
         return render_template('login.html')
 
-    data = request.get_json() or request.form
+    j = request.get_json(silent=True)
+    data = j or request.form
     username = data.get('username')
     password = data.get('password')
 
@@ -347,7 +266,6 @@ def login():
         flash('Invalid username or password', 'error')
         return redirect(url_for('login'))
 
-    # inactivity deletion: if more than 30 days since last_login
     if user.last_login and datetime.utcnow() - user.last_login > timedelta(days=30):
         db.session.delete(user)
         db.session.commit()
@@ -386,13 +304,11 @@ def delete_account():
         return redirect(url_for('login'))
 
     user = User.query.get(session['user_id'])
-
     if not user:
         session.clear()
         flash('User not found', 'error')
         return redirect(url_for('index'))
 
-    # remove any files on disk owned by this user
     for f in user.files:
         try:
             os.remove(os.path.join(app.config['UPLOAD_FOLDER'], f.stored_name))
@@ -401,20 +317,12 @@ def delete_account():
     db.session.delete(user)
     db.session.commit()
     session.clear()
-
     flash('Your account has been deleted', 'info')
     return redirect(url_for('index'))
 
 
-# --- Connection/Chat Logic ---
-
 @app.route('/connect', methods=['GET', 'POST'])
 def send_connection_request():
-    """Allow the logged‑in user to request a connection by username.
-
-    Prevents duplicate requests and respects blacklists.
-    """
-    # prevent sending to users who have blacklisted you
     if 'user_id' not in session:
         flash('Please log in first', 'error')
         return redirect(url_for('login'))
@@ -436,12 +344,10 @@ def send_connection_request():
         flash('No such user', 'error')
         return redirect(url_for('send_connection_request'))
 
-    # don't allow if receiver has blocked you
     if Blacklist.query.filter_by(blocker_id=receiver.id, blocked_id=session['user_id']).first():
         flash('Cannot send request; you are blocked by that user', 'error')
         return redirect(url_for('send_connection_request'))
 
-    # avoid duplicate pending/accepted connections
     existing = Connection.query.filter(
         ((Connection.sender_id == session['user_id']) & (Connection.receiver_id == receiver.id)) |
         ((Connection.sender_id == receiver.id) &
@@ -460,8 +366,6 @@ def send_connection_request():
 
 @app.route('/connections')
 def list_connections():
-    # also show incoming requests with deny option
-    """Show pending/accepted connection requests for the user."""
     if 'user_id' not in session:
         return redirect(url_for('login'))
 
@@ -475,7 +379,6 @@ def list_connections():
         (Connection.status == 'accepted')
     ).all()
 
-    # enrich with usernames
     def other_info(conn):
         if conn.sender_id == uid:
             other = User.query.get(conn.receiver_id)
@@ -499,7 +402,6 @@ def deny_connection(conn_id):
     if not conn or conn.receiver_id != session['user_id']:
         flash('Invalid connection', 'error')
         return redirect(url_for('list_connections'))
-    # create blacklist entry
     blk = Blacklist(blocker_id=conn.receiver_id, blocked_id=conn.sender_id)
     db.session.add(blk)
     conn.status = 'denied'
@@ -517,11 +419,6 @@ def accept_connection(conn_id):
         flash('Invalid connection', 'error')
         return redirect(url_for('list_connections'))
 
-    # generate PGP key pairs for both sides and a symmetric chat key
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.hazmat.primitives import serialization
-
-    # helper to create and encrypt key for user
     def make_and_store_keys(user, priv_attr, pub_attr):
         priv, pub = generate_rsa_keypair()
         setattr(conn, priv_attr, encrypt_with_user_key(user, priv))
@@ -535,7 +432,6 @@ def accept_connection(conn_id):
         make_and_store_keys(receiver, 'receiver_privkey_enc',
                             'receiver_pubkey_enc')
 
-        # store each other's public key in contacts for convenience
         c1 = Contact(user_id=sender.id, contact_id=receiver.id,
                      connection_id=conn.id,
                      public_key_enc=conn.receiver_pubkey_enc)
@@ -544,7 +440,6 @@ def accept_connection(conn_id):
                      public_key_enc=conn.sender_pubkey_enc)
         db.session.add_all([c1, c2])
 
-        # generate symmetric chat key and encrypt for each user
         chat_key = generate_fernet_key()
         conn.chat_key_enc_sender = encrypt_with_user_key(sender, chat_key)
         conn.chat_key_enc_receiver = encrypt_with_user_key(receiver, chat_key)
@@ -560,22 +455,20 @@ def send_message():
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
     sender = session['user_id']
-    receiver = request.form.get(
-        'receiver_id') or request.json.get('receiver_id')
-    text = request.form.get('message') or request.json.get('message')
+    j = request.get_json(silent=True)
+    receiver = request.form.get('receiver_id') or (j.get('receiver_id') if j else None)
+    text = request.form.get('message') or (j.get('message') if j else None)
     if not receiver or not text:
         return jsonify({'error': 'Missing parameters'}), 400
     try:
         receiver = int(receiver)
     except ValueError:
         return jsonify({'error': 'Bad receiver id'}), 400
-    # ensure there's an accepted connection
     conn = Connection.query.filter(
         ((Connection.sender_id == sender) & (Connection.receiver_id == receiver)) |
         ((Connection.sender_id == receiver) & (Connection.receiver_id == sender)), Connection.status == 'accepted').first()
     if not conn:
         return jsonify({'error': 'No accepted connection'}), 403
-    # retrieve chat key for sender
     if conn.sender_id == sender:
         enc_key = conn.chat_key_enc_sender
     else:
@@ -598,7 +491,6 @@ def poll_messages():
         receiver_id=uid, delivered=False).order_by(Message.timestamp).all()
     out = []
     for m in msgs:
-        # decrypt with chat key stored in connection
         conn = Connection.query.filter(
             ((Connection.sender_id == m.sender_id) & (Connection.receiver_id == uid)) |
             ((Connection.sender_id == uid) & (Connection.receiver_id == m.sender_id)), Connection.status == 'accepted').first()
@@ -628,11 +520,9 @@ def poll_messages():
 
 @app.route('/chat/<int:other_id>', methods=['GET', 'POST'])
 def chat_page(other_id):
-    """Simple page where current user can see conversation with ``other_id``."""
     if 'user_id' not in session:
         return redirect(url_for('login'))
     uid = session['user_id']
-    # ensure accepted connection
     conn = Connection.query.filter(
         ((Connection.sender_id == uid) & (Connection.receiver_id == other_id)) |
         ((Connection.sender_id == other_id) & (Connection.receiver_id == uid)), Connection.status == 'accepted').first()
@@ -640,7 +530,6 @@ def chat_page(other_id):
         flash('No chat available', 'error')
         return redirect(url_for('list_connections'))
 
-    # get chat key for decryption/encryption
     if conn.sender_id == uid:
         enc_key = conn.chat_key_enc_sender
     else:
@@ -657,13 +546,11 @@ def chat_page(other_id):
             db.session.commit()
             return redirect(url_for('chat_page', other_id=other_id))
 
-    # load last 50 messages
     msgs = Message.query.filter(
         ((Message.sender_id == uid) & (Message.receiver_id == other_id)) |
         ((Message.sender_id == other_id) & (Message.receiver_id == uid))
     ).order_by(Message.timestamp).limit(50).all()
 
-    # decrypt messages for display
     for m in msgs:
         try:
             m.content = Fernet(chat_key.encode()).decrypt(
@@ -674,7 +561,6 @@ def chat_page(other_id):
     return render_template('chat.html', messages=msgs, other_id=other_id)
 
 
-# --- search and file hosting ---
 @app.route('/search')
 def search_users():
     if 'user_id' not in session:
@@ -682,7 +568,6 @@ def search_users():
     q = request.args.get('q', '').strip()
     results = []
     if q:
-        # exclude users who have blocked current user or whom current user has blocked
         blocked_by = [b.blocker_id for b in Blacklist.query.filter_by(blocked_id=session['user_id']).all()]
         blocked_out = [b.blocked_id for b in Blacklist.query.filter_by(blocker_id=session['user_id']).all()]
         excluded = set(blocked_by) | set(blocked_out) | {session['user_id']}
@@ -713,7 +598,6 @@ def upload_file():
         return redirect(url_for('upload_file'))
     if expiry_days > 365:
         expiry_days = 365
-    # sanitize filename for display purposes (stored name is random)
     f.filename = secure_filename(f.filename)
     key = Fernet.generate_key().decode('utf-8')
     data = f.read()
@@ -739,7 +623,6 @@ def download_file(file_id):
     if not fi:
         flash('File not found', 'error')
         return redirect(url_for('list_files'))
-    # check owner or access
     if fi.owner_id != session['user_id'] and not FileAccess.query.filter_by(file_id=file_id, user_id=session['user_id']).first():
         flash('Not authorized', 'error')
         return redirect(url_for('list_files'))
@@ -787,17 +670,9 @@ def share_file(file_id):
     return redirect(url_for('list_files'))
 
 
-# --- Main Execution ---
+# --- Main (no Tor) ---
 if __name__ == "__main__":
-    # ensure database tables are created before the first request
     with app.app_context():
         db.create_all()
-
-    try:
-        connect_to_tor()
-        # start the Flask app after the hidden service has been created
-        app.run(port=5000)
-    finally:
-        if hasattr(app, 'tor_service'):
-            print("Closing hidden service...")
-            app.tor_service.remove()
+    print("GhostCache (surface web) running at http://127.0.0.1:5000/")
+    app.run(host='0.0.0.0', port=5000, debug=True)

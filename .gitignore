@@ -1,2 +1,9 @@
 myvenv/
+.venv/
 .env
+copy/myvenv/
+__pycache__
+instance/
+copy/instance/
+uploads/
+copy/uploads/
