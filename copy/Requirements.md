@@ -5,11 +5,18 @@
 **Features** :
 - Self Hosted
 - Quick registration - username, password, d_password (destruction_password).
-  - 'username' should consist 'a-z, 0-9, _' only. It should always start with characters. username must be max '<=15' charaters long.
+  - 'username' should consist 'a-z, 0-9, _ (underscore)' only. It should always start with characters. username must be max '<=15' charaters long.
+  - 'password', 'd_password', 'master_key' validation should be there.
+    - It should be at least 8 characters long.
+    - It should contain [A-Z, a-z, 0-9 and special characters(@,#,$,%,etc)].
+    - It shouldn't be recognizable, ["12345", "username", "username@123", "000", "ILOVEYOU", etc]
   - User's 'password' and 'd_password', admin's 'password' and 'master_key' should be salted before storing to DB.
+  - 'password' and 'd_password' and 'master_key' should
   - Usage of 'rainbow table' is recommended for salt randomization.
 - Admin's approval to user's account registration request is mandatory. Also admin can create anonymous accounts that should be only provided to highly confidential people.
   - If admin creates an account of a person, there should be first login password set by admin. Once user logins using that temporary single use password, user has to set new password for that account.
+  - Admin can create user accounts with 'Visible' and 'Hidden' profile visibiltiy. Users with 'Visibile' visibility are visible in user search list. Any user can search for their username and send them connection request. In other hand, users with 'Hidden' visibility can search for 'Visible' users and send them connection request, but other users can't search of users with 'Hidden' visibility. Users with 'Hidden' profile visibility shouldn't be shown in the search list. If any user ('Visible', 'Hidden') want to initiate communication (send connection request), they must know the exact username of 'Hidden' users.
+  - If 'Hidden' user gets request and initiates the connection or vice versa, 'admin' should get notified about the connection.
 - User can delete their account using 'destruction password', from settings or Admin can delete user's account.
   - User account should be logical delete, not pysical delete. User should be tagged as deleted, account's view only rights should be transfered to admin automatically.
   - Admin can only access and view the account, chats, shared files. Admin can't initiate new connections, can't share new files, can't accept new connection requests.
