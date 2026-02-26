@@ -29,6 +29,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from flask import Flask, flash, redirect, render_template, request, send_file, session, url_for
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from werkzeug.utils import secure_filename
 
 
@@ -99,15 +101,22 @@ def _csrf_protect() -> Optional[Tuple[str, int]]:
 # perform housekeeping on every request
 @app.before_request
 def cleanup():
+    _init_db()
     now = utcnow()
-    expired = File.query.filter(File.expiry < now).all()
-    for f in expired:
-        try:
-            os.remove(os.path.join(app.config["UPLOAD_FOLDER"], f.stored_name))
-        except Exception:
-            pass
-        db.session.delete(f)
-    db.session.commit()
+    try:
+        expired = File.query.filter(File.expiry < now).all()
+        for f in expired:
+            try:
+                os.remove(os.path.join(app.config["UPLOAD_FOLDER"], f.stored_name))
+            except Exception:
+                pass
+            db.session.delete(f)
+        db.session.commit()
+    except OperationalError:
+        # Likely schema mismatch during upgrades; init and continue.
+        db.session.rollback()
+        _init_db(force=True)
+        return
 
 
 _RATE_BUCKET = {}  # (ip, key) -> [count, window_start_ts]
@@ -204,6 +213,146 @@ def security_checks():
         return msg, code
 
 
+_DB_INITIALIZED = False
+
+
+def _sqlite_column_names(table_name: str) -> set[str]:
+    rows = db.session.execute(text(f"PRAGMA table_info({table_name})")).all()
+    return {r[1] for r in rows}
+
+
+def _sqlite_add_column(table: str, col_def_sql: str) -> None:
+    db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_def_sql}"))
+
+
+def _ensure_sqlite_schema() -> None:
+    """
+    Best-effort schema upgrade for existing sqlite databases.
+    Adds missing columns required by current models.
+    """
+    if db.engine.dialect.name != "sqlite":
+        return
+
+    # user table
+    cols = _sqlite_column_names("user")
+    if "is_admin" not in cols:
+        _sqlite_add_column("user", "is_admin BOOLEAN NOT NULL DEFAULT 0")
+    if "approved" not in cols:
+        _sqlite_add_column("user", "approved BOOLEAN NOT NULL DEFAULT 0")
+    if "visibility" not in cols:
+        _sqlite_add_column("user", "visibility VARCHAR(10) NOT NULL DEFAULT 'visible'")
+    if "force_password_change" not in cols:
+        _sqlite_add_column("user", "force_password_change BOOLEAN NOT NULL DEFAULT 0")
+    if "deleted" not in cols:
+        _sqlite_add_column("user", "deleted BOOLEAN NOT NULL DEFAULT 0")
+    if "deleted_at" not in cols:
+        _sqlite_add_column("user", "deleted_at DATETIME")
+    if "deleted_original_username" not in cols:
+        _sqlite_add_column("user", "deleted_original_username VARCHAR(80)")
+    if "ed25519_pub_b64" not in cols:
+        _sqlite_add_column("user", "ed25519_pub_b64 TEXT")
+    if "ed25519_priv_enc" not in cols:
+        _sqlite_add_column("user", "ed25519_priv_enc TEXT")
+
+    # connection table
+    cols = _sqlite_column_names("connection")
+    if "chat_key_enc_sender" not in cols:
+        _sqlite_add_column("connection", "chat_key_enc_sender TEXT")
+    if "chat_key_enc_receiver" not in cols:
+        _sqlite_add_column("connection", "chat_key_enc_receiver TEXT")
+
+    # message table
+    cols = _sqlite_column_names("message")
+    if "signature" not in cols:
+        _sqlite_add_column("message", "signature TEXT")
+    if "sha256_hash" not in cols:
+        _sqlite_add_column("message", "sha256_hash TEXT")
+
+    # file table
+    cols = _sqlite_column_names("file")
+    if "owner_key_enc" not in cols:
+        _sqlite_add_column("file", "owner_key_enc TEXT")
+    if "nonce_b64" not in cols:
+        _sqlite_add_column("file", "nonce_b64 TEXT")
+
+    # file_access table
+    cols = _sqlite_column_names("file_access")
+    if "user_key_enc" not in cols:
+        _sqlite_add_column("file_access", "user_key_enc TEXT")
+
+    db.session.commit()
+
+
+def _normalize_existing_users() -> None:
+    """
+    - Wrap legacy plaintext `keys_database_key` with _APP_KEK (if needed)
+    - Ensure each user has ed25519 keys
+    """
+    try:
+        users = User.query.all()
+    except OperationalError:
+        db.session.rollback()
+        return
+
+    changed = False
+    for u in users:
+        # Wrap keys_database_key if it looks like plaintext
+        raw_key: Optional[bytes] = None
+        try:
+            raw_key = _APP_KEK.decrypt((u.keys_database_key or "").encode("utf-8"))
+        except Exception:
+            # If it's a valid Fernet key, wrap it.
+            try:
+                candidate = (u.keys_database_key or "").encode("utf-8")
+                Fernet(candidate)
+                raw_key = candidate
+                u.keys_database_key = _APP_KEK.encrypt(candidate).decode("utf-8")
+                changed = True
+            except Exception:
+                raw_key = None
+
+        # Ensure ed25519 keys exist (generate if missing)
+        if raw_key and (not getattr(u, "ed25519_pub_b64", None) or not getattr(u, "ed25519_priv_enc", None)):
+            priv = ed25519.Ed25519PrivateKey.generate()
+            pub = priv.public_key()
+            try:
+                priv_raw = priv.private_bytes_raw()
+                pub_raw = pub.public_bytes_raw()
+            except Exception:
+                from cryptography.hazmat.primitives import serialization
+
+                priv_raw = priv.private_bytes(
+                    encoding=serialization.Encoding.Raw,
+                    format=serialization.PrivateFormat.Raw,
+                    encryption_algorithm=serialization.NoEncryption(),
+                )
+                pub_raw = pub.public_bytes(
+                    encoding=serialization.Encoding.Raw,
+                    format=serialization.PublicFormat.Raw,
+                )
+            u.ed25519_pub_b64 = base64.urlsafe_b64encode(pub_raw).decode("utf-8")
+            u.ed25519_priv_enc = Fernet(raw_key).encrypt(priv_raw).decode("utf-8")
+            changed = True
+
+    if changed:
+        db.session.commit()
+
+
+def _init_db(force: bool = False) -> None:
+    global _DB_INITIALIZED
+    if _DB_INITIALIZED and not force:
+        return
+    try:
+        db.create_all()
+        _ensure_sqlite_schema()
+        _normalize_existing_users()
+        _DB_INITIALIZED = True
+    except OperationalError:
+        db.session.rollback()
+        # Don't block requests entirely; we'll retry later.
+        _DB_INITIALIZED = False
+
+
 # --- Database Models / core fields (rest of crypto/visibility logic extended below) ---
 
 
@@ -228,9 +377,9 @@ class User(db.Model):
 
     # Per-user key for encrypting private material (kept as Fernet key, wrapped with app KEK)
     keys_database_key = db.Column(db.String(200), nullable=False)
-    # ed25519 keypair for signing / verifying messages
-    ed25519_pub_b64 = db.Column(db.Text, nullable=False)
-    ed25519_priv_enc = db.Column(db.Text, nullable=False)
+    # ed25519 keypair for signing / verifying messages (nullable for legacy DB upgrades)
+    ed25519_pub_b64 = db.Column(db.Text, nullable=True)
+    ed25519_priv_enc = db.Column(db.Text, nullable=True)
 
     created_at = db.Column(db.DateTime, default=utcnow)
     last_login = db.Column(db.DateTime, default=utcnow)
@@ -501,6 +650,8 @@ def decrypt_message(chat_key: bytes, content_b64: str, sha256_b64: str, sig_b64:
 
 
 def _user_signer(user: User) -> ed25519.Ed25519PrivateKey:
+    if not user.ed25519_priv_enc:
+        raise ValueError("missing ed25519 private key")
     priv_raw = decrypt_with_user_key_bytes(user, user.ed25519_priv_enc)
     return ed25519.Ed25519PrivateKey.from_private_bytes(priv_raw)
 
@@ -509,14 +660,22 @@ def _user_verifier(user: User) -> ed25519.Ed25519PublicKey:
     return ed25519.Ed25519PublicKey.from_public_bytes(base64.urlsafe_b64decode(user.ed25519_pub_b64.encode("utf-8")))
 
 
-def _connection_chat_key(conn: Connection, user: User) -> bytes:
-    if conn.sender_id == user.id:
-        enc = conn.chat_key_enc_sender
-    else:
-        enc = conn.chat_key_enc_receiver
+def _connection_keys(conn: Connection, user: User) -> tuple[bytes, Optional[bytes]]:
+    """
+    Returns (aes_key_32, legacy_fernet_key_or_none).
+
+    - New connections store a raw 32-byte AES key.
+    - Legacy connections stored a Fernet key string; we deterministically derive an AES key
+      via SHA-256 while also returning the legacy key for decrypting old messages.
+    """
+    enc = conn.chat_key_enc_sender if conn.sender_id == user.id else conn.chat_key_enc_receiver
     if not enc:
         raise ValueError("missing connection key")
-    return decrypt_with_user_key_bytes(user, enc)
+    raw = decrypt_with_user_key_bytes(user, enc)
+    if len(raw) == 32:
+        return raw, None
+    # Legacy: derive AES key deterministically
+    return hashlib.sha256(raw).digest(), raw
 
 
 # --- Flask Routes ---
@@ -965,7 +1124,7 @@ def chat_page(other_id):
         return redirect(url_for('list_connections'))
 
     try:
-        chat_key = _connection_chat_key(conn, user)
+        chat_key, legacy_chat_key = _connection_keys(conn, user)
     except Exception:
         flash("Chat key unavailable.", "error")
         return redirect(url_for("list_connections"))
@@ -999,7 +1158,14 @@ def chat_page(other_id):
             m.content = ''  # type: ignore[attr-defined]
             continue
         if not m.sha256_hash or not m.signature:
-            plain = None
+            # Legacy message: Fernet token stored in m.content
+            if legacy_chat_key:
+                try:
+                    plain = Fernet(legacy_chat_key).decrypt(m.content.encode("utf-8")).decode("utf-8")
+                except Exception:
+                    plain = None
+            else:
+                plain = None
         else:
             plain = decrypt_message(
                 chat_key,
