@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Pending Approvals — Admin</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+  </head>
+  <body>
+    <h1>Pending Approvals</h1>
+    <ul>
+      {% for u in users %}
+        <li>{{ u.username }}
+          <form method="post" action="/admin/approve/{{ u.id }}" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit">Approve</button>
+          </form>
+        </li>
+      {% else %}
+        <li>No pending users.</li>
+      {% endfor %}
+    </ul>
+    <p><a href="/admin">Back</a></p>
+  </body>
+</html>

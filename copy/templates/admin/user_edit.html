@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Edit User — Admin</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+  </head>
+  <body>
+    <h1>Edit user: {{ u.username }}</h1>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Visibility</label>
+      <select name="visibility">
+        <option value="visible" {% if u.visibility=='visible' %}selected{% endif %}>visible</option>
+        <option value="hidden" {% if u.visibility=='hidden' %}selected{% endif %}>hidden</option>
+      </select><br>
+      <label>Approved</label>
+      <input type="checkbox" name="approved" {% if u.approved %}checked{% endif %}><br>
+      <button type="submit">Save</button>
+    </form>
+
+    <form method="post" action="/admin/delete_user/{{ u.id }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Confirm delete by typing DELETE</label>
+      <input name="confirm" required>
+      <label>Admin password or MASTER_KEY</label>
+      <input type="password" name="auth" required>
+      <button type="submit">EMERGENCY PHYSICAL DELETE</button>
+    </form>
+
+    <p><a href="/admin">Back</a></p>
+  </body>
+</html>

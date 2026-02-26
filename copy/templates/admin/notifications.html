@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Admin Notifications</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+  </head>
+  <body>
+    <h1>Notifications</h1>
+    <ul>
+      {% for n in notes %}
+        <li>[{% if n.read %}read{% else %}unread{% endif %}] {{ n.created_at }} — {{ n.message }}
+          <form method="post" action="/admin/notifications/{{ n.id }}/read" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit">Mark read</button>
+          </form>
+        </li>
+      {% else %}
+        <li>No notifications.</li>
+      {% endfor %}
+    </ul>
+    <p><a href="/admin">Back</a></p>
+  </body>
+</html>

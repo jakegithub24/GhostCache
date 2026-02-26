@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Create User — Admin</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+  </head>
+  <body>
+    <h1>Create User</h1>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Username</label>
+      <input name="username" required><br>
+      <label>Visibility</label>
+      <select name="visibility"><option value="visible">visible</option><option value="hidden">hidden</option></select><br>
+      <button type="submit">Create</button>
+    </form>
+    <p><a href="/admin">Back</a></p>
+  </body>
+</html>

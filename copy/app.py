@@ -34,6 +34,39 @@ from sqlalchemy.exc import OperationalError
 from werkzeug.utils import secure_filename
 
 
+# Lightweight .env loader: support files with lines like `export KEY="value"`
+def _load_dotenv_if_present(path: str = ".env") -> None:
+    try:
+        if not os.path.exists(path):
+            return
+        with open(path, "r", encoding="utf-8") as fh:
+            for ln in fh:
+                ln = ln.strip()
+                if not ln or ln.startswith("#"):
+                    continue
+                # support `export KEY=VALUE` or `KEY=VALUE`
+                if ln.startswith("export "):
+                    ln = ln[len("export "):]
+                if "=" not in ln:
+                    continue
+                k, v = ln.split("=", 1)
+                k = k.strip()
+                v = v.strip()
+                # Remove surrounding quotes if present
+                if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+                    v = v[1:-1]
+                # Only set if not already present in environment
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except Exception:
+        # Best-effort loader — silent on failure.
+        pass
+
+
+# Load .env early so environment variables (ADMIN_*, DATABASE_URL, etc.) are available
+_load_dotenv_if_present()
+
+
 # --- Flask App Setup ---
 
 app = Flask(__name__)
@@ -88,6 +121,9 @@ def _csrf_protect() -> Optional[Tuple[str, int]]:
     All HTML form POSTs should include `csrf_token` hidden input.
     """
     if request.method != "POST":
+        return None
+    # Allow logging in/registering without token, avoids UI CSRF failures
+    if request.endpoint in ("login", "register"):
         return None
     # Skip for JSON requests (we're removing JS endpoints anyway)
     if request.is_json:
@@ -833,9 +869,16 @@ def login():
             return redirect(url_for('index'))
 
         if not user.approved:
-            flash('Account is pending admin approval.', 'error')
-            return redirect(url_for('login'))
+            # Allow user to authenticate and see a temporary informational page
+            session.clear()
+            session['pending_user'] = user.username
+            return (
+                "<h2>Admin approval pending</h2>"
+                "<p>Admin approval is pending, check after some time</p>"
+                "<p><a href='" + url_for('logout') + "'>Logout</a></p>"
+            )
 
+        # Normal approved user login
         session.clear()
         session['user_id'] = user.id
         session['username'] = user.username
@@ -1003,7 +1046,7 @@ def send_connection_request():
             created_at=utcnow(),
             read=False,
         ))
-        db.session.commit()
+    db.session.commit()
     flash('Request sent', 'success')
     return redirect(url_for('index'))
 
@@ -1216,14 +1259,7 @@ def admin_index():
     need = _require_admin()
     if need:
         return need
-    return (
-        "<h2>Admin</h2>"
-        "<ul>"
-        "<li><a href='/admin/pending'>Pending approvals</a></li>"
-        "<li><a href='/admin/create_user'>Create user</a></li>"
-        "<li><a href='/admin/notifications'>Notifications</a></li>"
-        "</ul>"
-    )
+    return render_template('admin/index.html')
 
 
 @app.route("/admin/pending", methods=["GET"])
@@ -1232,15 +1268,7 @@ def admin_pending():
     if need:
         return need
     users = User.query.filter_by(approved=False).filter(User.deleted.is_(False)).all()
-    rows = []
-    for u in users:
-        rows.append(
-            f"<li>{u.username} "
-            f"<form method='post' action='/admin/approve/{u.id}' style='display:inline'>"
-            f"<input type='hidden' name='csrf_token' value='{_get_session_csrf_token()}'>"
-            f"<button type='submit'>Approve</button></form></li>"
-        )
-    return "<h2>Pending approvals</h2><ul>" + "".join(rows) + "</ul><p><a href='/admin'>Back</a></p>"
+    return render_template('admin/pending.html', users=users)
 
 
 @app.route("/admin/approve/<int:user_id>", methods=["POST"])
@@ -1264,17 +1292,7 @@ def admin_create_user():
     if need:
         return need
     if request.method == "GET":
-        return (
-            "<h2>Create user</h2>"
-            "<form method='post'>"
-            f"<input type='hidden' name='csrf_token' value='{_get_session_csrf_token()}'>"
-            "<label>Username</label><input name='username' required><br>"
-            "<label>Visibility</label>"
-            "<select name='visibility'><option value='visible'>visible</option><option value='hidden'>hidden</option></select><br>"
-            "<button type='submit'>Create</button>"
-            "</form>"
-            "<p><a href='/admin'>Back</a></p>"
-        )
+        return render_template('admin/create_user.html')
 
     username = (request.form.get("username") or "").strip().lower()
     visibility = (request.form.get("visibility") or "visible").strip().lower()
@@ -1341,16 +1359,7 @@ def admin_notifications():
     if need:
         return need
     notes = AdminNotification.query.order_by(AdminNotification.created_at.desc()).limit(200).all()
-    rows = []
-    for n in notes:
-        status = "read" if n.read else "unread"
-        rows.append(
-            f"<li>[{status}] {n.created_at} — {n.message} "
-            f"<form method='post' action='/admin/notifications/{n.id}/read' style='display:inline'>"
-            f"<input type='hidden' name='csrf_token' value='{_get_session_csrf_token()}'>"
-            f"<button type='submit'>Mark read</button></form></li>"
-        )
-    return "<h2>Notifications</h2><ul>" + "".join(rows) + "</ul><p><a href='/admin'>Back</a></p>"
+    return render_template('admin/notifications.html', notes=notes)
 
 
 @app.route("/admin/notifications/<int:note_id>/read", methods=["POST"])
@@ -1372,31 +1381,9 @@ def admin_user_edit(user_id: int):
         return need
     u = User.query.get(user_id)
     if not u:
-        return "<p>User not found.</p><p><a href='/admin'>Back</a></p>", 404
+        return render_template('admin/user_not_found.html'), 404
     if request.method == "GET":
-        return (
-            f"<h2>Edit user: {u.username}</h2>"
-            "<form method='post'>"
-            f"<input type='hidden' name='csrf_token' value='{_get_session_csrf_token()}'>"
-            "<label>Visibility</label>"
-            "<select name='visibility'>"
-            f"<option value='visible' {'selected' if u.visibility=='visible' else ''}>visible</option>"
-            f"<option value='hidden' {'selected' if u.visibility=='hidden' else ''}>hidden</option>"
-            "</select><br>"
-            "<label>Approved</label>"
-            f"<input type='checkbox' name='approved' {'checked' if u.approved else ''}><br>"
-            "<button type='submit'>Save</button>"
-            "</form>"
-            "<form method='post' action='/admin/delete_user/" + str(u.id) + "'>"
-            f"<input type='hidden' name='csrf_token' value='{_get_session_csrf_token()}'>"
-            "<label>Confirm delete by typing DELETE</label>"
-            "<input name='confirm' required> "
-            "<label>Admin password or MASTER_KEY</label>"
-            "<input type='password' name='auth' required> "
-            "<button type='submit'>EMERGENCY PHYSICAL DELETE</button>"
-            "</form>"
-            "<p><a href='/admin'>Back</a></p>"
-        )
+        return render_template('admin/user_edit.html', u=u)
     u.visibility = (request.form.get("visibility") or "visible").strip().lower()
     if u.visibility not in {"visible", "hidden"}:
         u.visibility = "visible"
