@@ -20,9 +20,11 @@
         {% for item in pending_recv %}
             <li>{{ item.other.username }}
                 <form method="post" action="{{ url_for('accept_connection', conn_id=item.conn.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit">Accept</button>
                 </form>
                 <form method="post" action="{{ url_for('deny_connection', conn_id=item.conn.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit">Deny</button>
                 </form>
             </li>

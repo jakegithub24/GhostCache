@@ -11,10 +11,12 @@
             <li>{{ f.filename }} (expires {{ f.expiry }}) 
                 <a href="{{ url_for('download_file', file_id=f.id) }}">Download</a>
                 <form method="post" action="{{ url_for('share_file', file_id=f.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="text" name="username" placeholder="share with...">
                     <button type="submit">Share</button>
                 </form>
-                <form method="post" action="{{ url_for('delete_file', file_id=f.id) }}" style="display:inline;" onsubmit="return confirm('Delete this file?');">
+                <form method="post" action="{{ url_for('delete_file', file_id=f.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit">Delete</button>
                 </form>
             </li>

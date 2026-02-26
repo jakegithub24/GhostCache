@@ -5,6 +5,7 @@
 {% block content %}
     <h2>Send a connection request</h2>
     <form method="post" action="{{ url_for('send_connection_request') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label for="username">Username of recipient</label>
         <input type="text" name="username" id="username" required>
         <button type="submit">Send request</button>
