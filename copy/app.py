@@ -1,82 +1,140 @@
-# GhostCache — surface-web (non-Tor) variant for local/testing use.
-# No Tor or stem dependency; runs as a normal Flask app.
+"""
+GhostCache — surface-web (non-Tor) variant for local/testing use.
 
-from argon2.exceptions import VerifyMismatchError
-from argon2 import PasswordHasher
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.fernet import Fernet
-from flask_sqlalchemy import SQLAlchemy
-from flask import Flask, request, session, jsonify, url_for, redirect, render_template, flash, send_file
-from werkzeug.utils import secure_filename
-from datetime import datetime, timedelta
-import string
-import random
+Core goals from Requirements.md:
+- Strict username/password/destruction-password validation.
+- Admin approval and account visibility (Visible/Hidden).
+- Logical deletion via destruction password; admin view-only access via master_key.
+- Encrypted messaging + file sharing (details added further below).
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
 import os
+import random
+import re
+import string
+from datetime import datetime, timedelta
+from typing import Optional, Tuple
+
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
+from cryptography.fernet import Fernet
+from flask import (
+    Flask,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
+)
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.utils import secure_filename
+
 
 # --- Flask App Setup ---
+
 app = Flask(__name__)
-app.secret_key = os.urandom(24)  # In production, set a fixed secret key
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///test.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-# limit uploads to 50MB by default
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+app.secret_key = os.environ.get("SECRET_KEY", os.urandom(24))
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL", "sqlite:///test.db")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
+
 db = SQLAlchemy(app)
 
-UPLOAD_FOLDER = 'uploads'
+UPLOAD_FOLDER = os.environ.get("UPLOAD_FOLDER", "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+
+
+def _derive_app_kek() -> bytes:
+    """
+    Derive a stable 32-byte key-encryption-key from SECRET_KEY.
+    This key never leaves the app process; it is used only to
+    wrap/unwrap per-user encryption keys stored in the database.
+    """
+    secret = app.secret_key
+    if not isinstance(secret, (bytes, bytearray)):
+        secret = str(secret).encode("utf-8")
+    digest = hashlib.sha256(secret).digest()  # 32 bytes
+    return base64.urlsafe_b64encode(digest)
+
+
+_APP_KEK = Fernet(_derive_app_kek())
+
+
+def utcnow() -> datetime:
+    return datetime.utcnow()
+
 
 # perform housekeeping on every request
 @app.before_request
 def cleanup():
-    now = datetime.utcnow()
-    # remove expired files
+    now = utcnow()
     expired = File.query.filter(File.expiry < now).all()
     for f in expired:
         try:
-            os.remove(os.path.join(app.config['UPLOAD_FOLDER'], f.stored_name))
+            os.remove(os.path.join(app.config["UPLOAD_FOLDER"], f.stored_name))
         except Exception:
             pass
         db.session.delete(f)
     db.session.commit()
 
-# --- Database Models ---
+
+# --- Database Models / core fields (rest of crypto/visibility logic extended below) ---
 
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    password_hash = db.Column(db.String(200), nullable=False)  # Argon2 hash
-    dpass_hash = db.Column(db.String(200), nullable=False)
-    keys_database_key = db.Column(
-        db.String(200), nullable=False)  # Fernet key (base64)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    last_login = db.Column(db.DateTime, default=datetime.utcnow)
+    username = db.Column(db.String(80), unique=True, nullable=False, index=True)
 
-    sent_connections = db.relationship('Connection',
-                                       foreign_keys='Connection.sender_id',
-                                       cascade='all, delete-orphan')
-    received_connections = db.relationship('Connection',
-                                           foreign_keys='Connection.receiver_id',
-                                           cascade='all, delete-orphan')
-    sent_messages = db.relationship('Message',
-                                    foreign_keys='Message.sender_id',
-                                    cascade='all, delete-orphan')
-    received_messages = db.relationship('Message',
-                                        foreign_keys='Message.receiver_id',
-                                        cascade='all, delete-orphan')
-    files = db.relationship('File', backref='owner',
-                            cascade='all, delete-orphan')
-    blacklist_out = db.relationship('Blacklist',
-                                    foreign_keys='Blacklist.blocker_id',
-                                    cascade='all, delete-orphan')
-    blacklist_in = db.relationship('Blacklist',
-                                   foreign_keys='Blacklist.blocked_id',
-                                   cascade='all, delete-orphan')
-    accessible_files = db.relationship('FileAccess',
-                                       foreign_keys='FileAccess.user_id',
-                                       cascade='all, delete-orphan')
+    # Authentication
+    password_hash = db.Column(db.String(200), nullable=False)  # Argon2id hash
+    dpass_hash = db.Column(db.String(200), nullable=False)  # destruction password hash
+
+    # Account flags
+    is_admin = db.Column(db.Boolean, default=False, nullable=False)
+    approved = db.Column(db.Boolean, default=False, nullable=False)
+    visibility = db.Column(db.String(10), default="visible", nullable=False)  # "visible" | "hidden"
+
+    # Logical deletion
+    deleted = db.Column(db.Boolean, default=False, nullable=False)
+    deleted_at = db.Column(db.DateTime, nullable=True)
+    deleted_original_username = db.Column(db.String(80), nullable=True)
+
+    # Per-user key for encrypting private material (kept as Fernet key for now)
+    keys_database_key = db.Column(db.String(200), nullable=False)
+
+    created_at = db.Column(db.DateTime, default=utcnow)
+    last_login = db.Column(db.DateTime, default=utcnow)
+
+    sent_connections = db.relationship(
+        "Connection", foreign_keys="Connection.sender_id", cascade="all, delete-orphan"
+    )
+    received_connections = db.relationship(
+        "Connection", foreign_keys="Connection.receiver_id", cascade="all, delete-orphan"
+    )
+    sent_messages = db.relationship(
+        "Message", foreign_keys="Message.sender_id", cascade="all, delete-orphan"
+    )
+    received_messages = db.relationship(
+        "Message", foreign_keys="Message.receiver_id", cascade="all, delete-orphan"
+    )
+    files = db.relationship("File", backref="owner", cascade="all, delete-orphan")
+    blacklist_out = db.relationship(
+        "Blacklist", foreign_keys="Blacklist.blocker_id", cascade="all, delete-orphan"
+    )
+    blacklist_in = db.relationship(
+        "Blacklist", foreign_keys="Blacklist.blocked_id", cascade="all, delete-orphan"
+    )
+    accessible_files = db.relationship(
+        "FileAccess", foreign_keys="FileAccess.user_id", cascade="all, delete-orphan"
+    )
 
 
 class Connection(db.Model):
@@ -95,12 +153,15 @@ class Connection(db.Model):
 
 
 class Contact(db.Model):
+    """
+    Legacy model kept for compatibility with existing databases.
+    The application no longer uses this table, but it is left here so that
+    Alembic/SQLAlchemy can still reflect it if present.
+    """
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    contact_id = db.Column(
-        db.Integer, db.ForeignKey('user.id'), nullable=False)
-    connection_id = db.Column(db.Integer, db.ForeignKey(
-        'connection.id'), nullable=False)
+    contact_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    connection_id = db.Column(db.Integer, db.ForeignKey('connection.id'), nullable=False)
     public_key_enc = db.Column(db.Text, nullable=False)
 
 
@@ -140,6 +201,93 @@ class Message(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     delivered = db.Column(db.Boolean, default=False)
 
+
+def _logical_delete_user(user: User, by_admin: bool) -> None:
+    """
+    Logical delete, as per requirements:
+    - Tag account as deleted (no physical delete).
+    - Transfer view-only rights to admin via master_key: hash(master_key) copied into password_hash.
+    - Username changed to 'deleted_username' for clarity.
+    """
+    master_key = os.environ.get("MASTER_KEY")
+    if not master_key:
+        # Fallback: random value, so deleted account cannot be logged in again.
+        master_key = os.urandom(32).hex()
+
+    original_username = user.username
+    base_deleted = f"deleted_{original_username}"
+
+    # Ensure uniqueness even under concurrency by looping until we find a free name.
+    deleted_username = base_deleted
+    while User.query.filter_by(username=deleted_username).first():
+        suffix = random.randint(1000, 9999)
+        deleted_username = f"{base_deleted}_{suffix}"
+
+    user.deleted = True
+    user.deleted_at = utcnow()
+    user.deleted_original_username = original_username
+    user.username = deleted_username
+    user.password_hash = hash_password(master_key)
+    user.approved = True  # allow master-key login if needed
+    db.session.commit()
+
+USERNAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,14}$")  # 1–15 chars, starts with letter
+
+
+def validate_username(username: str) -> Tuple[bool, str]:
+    if not username:
+        return False, "Username is required."
+    if username != username.lower():
+        return False, "Username must be lowercase a–z, 0–9, _."
+    if not USERNAME_RE.fullmatch(username):
+        return (
+            False,
+            "Username must be 1–15 chars, start with a letter, and contain only a–z, 0–9, _.",
+        )
+    return True, ""
+
+
+_COMMON_BAD_PASSWORDS = {
+    "12345",
+    "123456",
+    "password",
+    "000",
+    "0000",
+    "00000",
+    "iloveyou",
+    "qwerty",
+    "letmein",
+}
+
+
+def validate_password(password: str, username: Optional[str] = None) -> Tuple[bool, str]:
+    if not password:
+        return False, "Password is required."
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters long."
+    if not re.search(r"[A-Z]", password):
+        return False, "Password must contain at least one uppercase letter."
+    if not re.search(r"[a-z]", password):
+        return False, "Password must contain at least one lowercase letter."
+    if not re.search(r"[0-9]", password):
+        return False, "Password must contain at least one digit."
+    if not re.search(r"[^A-Za-z0-9]", password):
+        return False, "Password must contain at least one special character."
+
+    pnorm = password.strip().lower()
+    if pnorm in _COMMON_BAD_PASSWORDS:
+        return False, "Password is too common/recognizable."
+
+    if username:
+        u = username.lower()
+        if u and u in pnorm:
+            return False, "Password must not contain your username."
+        if pnorm in {u, f"{u}123", f"{u}@123"}:
+            return False, "Password is too recognizable."
+
+    return True, ""
+
+
 # --- Utility Functions ---
 
 ph = PasswordHasher()
@@ -165,33 +313,26 @@ def generate_fernet_key():
 
 
 def encrypt_with_user_key(user, plaintext):
-    key = user.keys_database_key.encode('utf-8')
-    f = Fernet(key)
+    # keys_database_key is stored wrapped with the app-level KEK
+    raw_key_str = _APP_KEK.decrypt(user.keys_database_key.encode("utf-8")).decode("utf-8")
+    f = Fernet(raw_key_str.encode("utf-8"))
     if isinstance(plaintext, str):
         plaintext = plaintext.encode('utf-8')
     return f.encrypt(plaintext).decode('utf-8')
 
 
 def decrypt_with_user_key(user, ciphertext):
-    key = user.keys_database_key.encode('utf-8')
-    f = Fernet(key)
+    raw_key_str = _APP_KEK.decrypt(user.keys_database_key.encode("utf-8")).decode("utf-8")
+    f = Fernet(raw_key_str.encode("utf-8"))
     return f.decrypt(ciphertext.encode('utf-8')).decode('utf-8')
 
 
 def generate_rsa_keypair():
-    private_key = rsa.generate_private_key(
-        public_exponent=65537, key_size=2048)
-    public_key = private_key.public_key()
-    pem_private = private_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption()
-    )
-    pem_public = public_key.public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo
-    )
-    return pem_private.decode('utf-8'), pem_public.decode('utf-8')
+    """
+    Deprecated: RSA keys are no longer generated or used by the application.
+    Left here only to avoid import-time errors in case of stale references.
+    """
+    raise RuntimeError("generate_rsa_keypair() is deprecated and should not be called.")
 
 # --- Flask Routes ---
 
@@ -216,12 +357,25 @@ def register():
 
     j = request.get_json(silent=True)
     data = j or request.form
-    username = data.get('username')
-    password = data.get('password')
-    d_pass = data.get('d_pass')
+    username_raw = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+    d_pass = data.get('d_pass') or ''
 
-    if not username or not password or not d_pass:
-        flash('All fields are required', 'error')
+    username = username_raw.lower()
+
+    ok_u, msg_u = validate_username(username)
+    if not ok_u:
+        flash(msg_u, 'error')
+        return redirect(url_for('register'))
+
+    ok_p, msg_p = validate_password(password, username=username)
+    if not ok_p:
+        flash(msg_p, 'error')
+        return redirect(url_for('register'))
+
+    ok_d, msg_d = validate_password(d_pass, username=username)
+    if not ok_d:
+        flash(f"Destruction password: {msg_d}", 'error')
         return redirect(url_for('register'))
 
     if User.query.filter_by(username=username).first():
@@ -230,19 +384,25 @@ def register():
 
     pwd_hash = hash_password(password)
     dpass_hash = hash_password(d_pass)
-    keys_db_key = generate_fernet_key()
+    # Store per-user Fernet key wrapped with app-level KEK so the raw key
+    # is never present in the database.
+    raw_user_key = generate_fernet_key()
+    keys_db_key = _APP_KEK.encrypt(raw_user_key.encode("utf-8")).decode("utf-8")
 
     user = User(
         username=username,
         password_hash=pwd_hash,
         dpass_hash=dpass_hash,
         keys_database_key=keys_db_key,
-        last_login=datetime.utcnow()
+        approved=False,          # requires admin approval
+        visibility='visible',    # default visibility
+        created_at=utcnow(),
+        last_login=utcnow()
     )
     db.session.add(user)
     db.session.commit()
 
-    flash('Account created, please log in', 'success')
+    flash('Registration submitted. Your account must be approved by admin.', 'info')
     return redirect(url_for('login'))
 
 
@@ -253,37 +413,47 @@ def login():
 
     j = request.get_json(silent=True)
     data = j or request.form
-    username = data.get('username')
-    password = data.get('password')
+    username_raw = (data.get('username') or '').strip()
+    password = data.get('password') or ''
 
-    if not username or not password:
+    if not username_raw or not password:
         flash('Please provide both username and password', 'error')
         return redirect(url_for('login'))
 
+    username = username_raw.lower()
     user = User.query.filter_by(username=username).first()
 
     if not user:
         flash('Invalid username or password', 'error')
         return redirect(url_for('login'))
 
-    if user.last_login and datetime.utcnow() - user.last_login > timedelta(days=30):
-        db.session.delete(user)
-        db.session.commit()
-        flash('Account expired due to inactivity; it has been removed', 'info')
-        return redirect(url_for('register'))
-
+    # First, try normal password
     if verify_password(user.password_hash, password):
+        if user.deleted:
+            # Deleted accounts are view-only, typically accessed via master key.
+            session.clear()
+            session['user_id'] = user.id
+            session['username'] = user.username
+            flash('View-only access to deleted account granted.', 'info')
+            return redirect(url_for('index'))
+
+        if not user.approved:
+            flash('Account is pending admin approval.', 'error')
+            return redirect(url_for('login'))
+
+        session.clear()
         session['user_id'] = user.id
         session['username'] = user.username
-        user.last_login = datetime.utcnow()
+        user.last_login = utcnow()
         db.session.commit()
         flash('Login successful', 'success')
         return redirect(url_for('index'))
 
-    if verify_password(user.dpass_hash, password):
-        db.session.delete(user)
-        db.session.commit()
-        flash('Account deleted (destruction password used)', 'success')
+    # Destruction password: logical delete instead of physical delete
+    if verify_password(user.dpass_hash, password) and not user.deleted:
+        _logical_delete_user(user, by_admin=False)
+        session.clear()
+        flash('Account deleted (destruction password used).', 'success')
         return redirect(url_for('index'))
 
     flash('Invalid username or password', 'error')
@@ -309,15 +479,17 @@ def delete_account():
         flash('User not found', 'error')
         return redirect(url_for('index'))
 
-    for f in user.files:
-        try:
-            os.remove(os.path.join(app.config['UPLOAD_FOLDER'], f.stored_name))
-        except Exception:
-            pass
-    db.session.delete(user)
-    db.session.commit()
+    d_pass = request.form.get('d_pass') or ''
+    if not d_pass:
+        flash('Destruction password is required to delete your account.', 'error')
+        return redirect(url_for('index'))
+    if not verify_password(user.dpass_hash, d_pass):
+        flash('Invalid destruction password.', 'error')
+        return redirect(url_for('index'))
+
+    _logical_delete_user(user, by_admin=False)
     session.clear()
-    flash('Your account has been deleted', 'info')
+    flash('Your account has been deleted.', 'info')
     return redirect(url_for('index'))
 
 
@@ -330,7 +502,8 @@ def send_connection_request():
     if request.method == 'GET':
         return render_template('connect.html')
 
-    target = request.form.get('username')
+    target_raw = request.form.get('username') or ''
+    target = target_raw.strip().lower()
     if not target:
         flash('Target username required', 'error')
         return redirect(url_for('send_connection_request'))
@@ -340,7 +513,7 @@ def send_connection_request():
         return redirect(url_for('send_connection_request'))
 
     receiver = User.query.filter_by(username=target).first()
-    if not receiver:
+    if not receiver or receiver.deleted or not receiver.approved:
         flash('No such user', 'error')
         return redirect(url_for('send_connection_request'))
 
@@ -419,27 +592,16 @@ def accept_connection(conn_id):
         flash('Invalid connection', 'error')
         return redirect(url_for('list_connections'))
 
-    def make_and_store_keys(user, priv_attr, pub_attr):
-        priv, pub = generate_rsa_keypair()
-        setattr(conn, priv_attr, encrypt_with_user_key(user, priv))
-        setattr(conn, pub_attr, encrypt_with_user_key(user, pub))
+    # Only allow accepting a pending connection once.
+    if conn.status != 'pending':
+        flash('Connection is not pending.', 'error')
+        return redirect(url_for('list_connections'))
 
     sender = User.query.get(conn.sender_id)
     receiver = User.query.get(conn.receiver_id)
 
     if sender and receiver:
-        make_and_store_keys(sender, 'sender_privkey_enc', 'sender_pubkey_enc')
-        make_and_store_keys(receiver, 'receiver_privkey_enc',
-                            'receiver_pubkey_enc')
-
-        c1 = Contact(user_id=sender.id, contact_id=receiver.id,
-                     connection_id=conn.id,
-                     public_key_enc=conn.receiver_pubkey_enc)
-        c2 = Contact(user_id=receiver.id, contact_id=sender.id,
-                     connection_id=conn.id,
-                     public_key_enc=conn.sender_pubkey_enc)
-        db.session.add_all([c1, c2])
-
+        # Single symmetric chat key per connection, wrapped separately for each user.
         chat_key = generate_fernet_key()
         conn.chat_key_enc_sender = encrypt_with_user_key(sender, chat_key)
         conn.chat_key_enc_receiver = encrypt_with_user_key(receiver, chat_key)
@@ -565,13 +727,20 @@ def chat_page(other_id):
 def search_users():
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    q = request.args.get('q', '').strip()
+    q = request.args.get('q', '').strip().lower()
     results = []
     if q:
         blocked_by = [b.blocker_id for b in Blacklist.query.filter_by(blocked_id=session['user_id']).all()]
         blocked_out = [b.blocked_id for b in Blacklist.query.filter_by(blocker_id=session['user_id']).all()]
         excluded = set(blocked_by) | set(blocked_out) | {session['user_id']}
-        results = User.query.filter(User.username.contains(q), ~User.id.in_(excluded)).all()
+        # Only list approved, non-deleted, visible users in search results.
+        results = User.query.filter(
+            User.username.contains(q),
+            ~User.id.in_(excluded),
+            User.approved.is_(True),
+            User.deleted.is_(False),
+            User.visibility == 'visible',
+        ).all()
     return render_template('search.html', results=results, query=q)
 
 
