@@ -1,17 +1,58 @@
 {% extends "base.html" %}
 
-{% block title %}Home - GhostCache{% endblock %}
+{% block title %}Home &mdash; GhostCache{% endblock %}
 
 {% block content %}
-    {% if user %}
-        <h2>Welcome, {{ user.username }}!</h2>
-        <p>Last login: {{ user.last_login }}</p>
-        <p><a href="{{ url_for('send_connection_request') }}">Send connection request</a> | <a href="{{ url_for('list_connections') }}">Manage connections</a></p>
-        <form method="post" action="{{ url_for('delete_account') }}" onsubmit="return confirm('Are you sure you want to delete your account?');">
-            <button type="submit" class="danger">Delete Account</button>
+{% if user %}
+    <div class="user-meta">
+        <div class="user-meta-avatar">{{ user.username[0] | upper }}</div>
+        <div class="user-meta-info">
+            <div class="user-meta-name">{{ user.username }}</div>
+            <div class="user-meta-last">Last login: {{ user.last_login }}</div>
+        </div>
+        <form method="post" action="{{ url_for('delete_account') }}" onsubmit="return confirm('This will permanently delete your account. Are you sure?');" style="display:inline;">
+            <button type="submit" class="danger inline-btn">Delete Account</button>
         </form>
-    {% else %}
-        <h2>Welcome to GhostCache</h2>
-        <p>Please <a href="{{ url_for('login') }}">login</a> or <a href="{{ url_for('register') }}">register</a> to continue.</p>
-    {% endif %}
+    </div>
+
+    <h2>Operations</h2>
+    <div class="dashboard-grid">
+        <a href="{{ url_for('send_connection_request') }}" class="dash-card">
+            <div class="dash-card-icon">+</div>
+            <div class="dash-card-label">Connect</div>
+            <div class="dash-card-desc">Send a connection request to another agent</div>
+        </a>
+        <a href="{{ url_for('list_connections') }}" class="dash-card">
+            <div class="dash-card-icon">#</div>
+            <div class="dash-card-label">Network</div>
+            <div class="dash-card-desc">Manage connections and pending requests</div>
+        </a>
+        <a href="{{ url_for('search_users') }}" class="dash-card">
+            <div class="dash-card-icon">~</div>
+            <div class="dash-card-label">Search</div>
+            <div class="dash-card-desc">Find agents by username</div>
+        </a>
+        <a href="{{ url_for('list_files') }}" class="dash-card">
+            <div class="dash-card-icon">/</div>
+            <div class="dash-card-label">Files</div>
+            <div class="dash-card-desc">Encrypted file storage and sharing</div>
+        </a>
+    </div>
+{% else %}
+    <div class="auth-wrap">
+        <div class="auth-box" style="text-align:center;">
+            <div class="auth-logo">
+                <span class="auth-logo-mark">[ GHOST ]</span>
+                <span class="auth-logo-sub">Secure communications network</span>
+            </div>
+            <p style="margin:1.25rem 0 0.5rem; font-size:0.85rem;">
+                A private, encrypted chat platform for secure communications.
+            </p>
+            <div style="display:flex; gap:0.75rem; margin-top:1.5rem;">
+                <a href="{{ url_for('login') }}" class="btn" style="flex:1; justify-content:center;">Login</a>
+                <a href="{{ url_for('register') }}" class="btn secondary" style="flex:1; justify-content:center;">Register</a>
+            </div>
+        </div>
+    </div>
+{% endif %}
 {% endblock %}

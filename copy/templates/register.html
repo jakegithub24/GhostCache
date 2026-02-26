@@ -1,20 +1,35 @@
 {% extends "base.html" %}
 
-{% block title %}Register - GhostCache{% endblock %}
+{% block title %}Register &mdash; GhostCache{% endblock %}
 
 {% block content %}
-    <h2>Create an account</h2>
-    <form method="post" action="{{ url_for('register') }}">
-        <label for="username">Username</label>
-        <input type="text" name="username" id="username" required>
+<div class="auth-wrap">
+    <div class="auth-box">
+        <div class="auth-logo">
+            <span class="auth-logo-mark">[ NEW AGENT ]</span>
+            <span class="auth-logo-sub">Create a secure identity</span>
+        </div>
 
-        <label for="password">Password</label>
-        <input type="password" name="password" id="password" required>
+        <form method="post" action="{{ url_for('register') }}">
+            <label for="username">Agent ID</label>
+            <input type="text" name="username" id="username" placeholder="choose a username" required autofocus>
 
-        <label for="d_pass">Destruction password</label>
-        <input type="password" name="d_pass" id="d_pass" required>
+            <label for="password">Passphrase</label>
+            <input type="password" name="password" id="password" placeholder="strong passphrase" required>
 
-        <button type="submit">Register</button>
-    </form>
-    <p>Already have an account? <a href="{{ url_for('login') }}">Log in here</a>.</p>
+            <label for="d_pass">Destruction Password</label>
+            <input type="password" name="d_pass" id="d_pass" placeholder="emergency wipe key" required>
+
+            <button type="submit">Create Identity &rarr;</button>
+        </form>
+
+        <div class="auth-warning">
+            &#9888; Destruction password will wipe your account data if entered at login. Store it safely.
+        </div>
+
+        <p class="auth-footer">
+            Already registered? <a href="{{ url_for('login') }}">Sign in</a>
+        </p>
+    </div>
+</div>
 {% endblock %}

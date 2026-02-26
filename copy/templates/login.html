@@ -1,17 +1,28 @@
 {% extends "base.html" %}
 
-{% block title %}Login - GhostCache{% endblock %}
+{% block title %}Login &mdash; GhostCache{% endblock %}
 
 {% block content %}
-    <h2>Login to your account</h2>
-    <form method="post" action="{{ url_for('login') }}">
-        <label for="username">Username</label>
-        <input type="text" name="username" id="username" required>
+<div class="auth-wrap">
+    <div class="auth-box">
+        <div class="auth-logo">
+            <span class="auth-logo-mark">[ GHOST ]</span>
+            <span class="auth-logo-sub">Secure comms &bull; Authenticate to proceed</span>
+        </div>
 
-        <label for="password">Password</label>
-        <input type="password" name="password" id="password" required>
+        <form method="post" action="{{ url_for('login') }}">
+            <label for="username">Agent ID</label>
+            <input type="text" name="username" id="username" placeholder="username" required autofocus>
 
-        <button type="submit">Login</button>
-    </form>
-    <p>Don't have an account? <a href="{{ url_for('register') }}">Register here</a>.</p>
+            <label for="password">Passphrase</label>
+            <input type="password" name="password" id="password" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" required>
+
+            <button type="submit">Authenticate &rarr;</button>
+        </form>
+
+        <p class="auth-footer">
+            No account? <a href="{{ url_for('register') }}">Register an agent</a>
+        </p>
+    </div>
+</div>
 {% endblock %}

@@ -558,7 +558,11 @@ def chat_page(other_id):
         except Exception:
             m.content = ''
 
-    return render_template('chat.html', messages=msgs, other_id=other_id)
+    other_user = db.session.get(User, other_id)
+
+    return render_template('chat.html', messages=msgs, other_id=other_id,
+                           other_username=other_user.username if other_user else str(other_id),
+                           refresh_interval=5)
 
 
 @app.route('/search')

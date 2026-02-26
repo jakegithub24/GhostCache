@@ -4,7 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}GhostCache{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block head %}{% endblock %}
 </head>
 <body>
     <header>
@@ -13,8 +16,9 @@
             {% if session.username %}
                 <a href="{{ url_for('index') }}">Home</a>
                 <a href="{{ url_for('search_users') }}">Search</a>
+                <a href="{{ url_for('list_connections') }}">Network</a>
                 <a href="{{ url_for('list_files') }}">Files</a>
-                <a href="{{ url_for('logout') }}">Logout</a>
+                <a href="{{ url_for('logout') }}" class="logout">Logout</a>
             {% else %}
                 <a href="{{ url_for('login') }}">Login</a>
                 <a href="{{ url_for('register') }}">Register</a>
@@ -37,7 +41,7 @@
     </main>
 
     <footer>
-        <small>&copy; 2026 GhostCache</small>
+        <small>&copy; 2026 GhostCache &mdash; end-to-end encrypted</small>
     </footer>
 </body>
 </html>

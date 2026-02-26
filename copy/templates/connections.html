@@ -1,45 +1,53 @@
 {% extends "base.html" %}
 
-{% block title %}Your Connections{% endblock %}
+{% block title %}Network &mdash; GhostCache{% endblock %}
 
 {% block content %}
-    <h2>Pending requests you've sent</h2>
-    {% if pending_sent %}
-        <ul>
-        {% for item in pending_sent %}
-            <li>{{ item.other.username }} (pending)</li>
-        {% endfor %}
-        </ul>
-    {% else %}
-        <p>None</p>
-    {% endif %}
+<h2>Sent requests</h2>
+{% if pending_sent %}
+    <ul>
+    {% for item in pending_sent %}
+        <li>
+            <span class="item-name">{{ item.other.username }}</span>
+            <span class="badge badge-pending">pending</span>
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <div class="empty">no outgoing requests</div>
+{% endif %}
 
-    <h2>Pending requests you've received</h2>
-    {% if pending_recv %}
-        <ul>
-        {% for item in pending_recv %}
-            <li>{{ item.other.username }}
-                <form method="post" action="{{ url_for('accept_connection', conn_id=item.conn.id) }}" style="display:inline;">
-                    <button type="submit">Accept</button>
-                </form>
-                <form method="post" action="{{ url_for('deny_connection', conn_id=item.conn.id) }}" style="display:inline;">
-                    <button type="submit">Deny</button>
-                </form>
-            </li>
-        {% endfor %}
-        </ul>
-    {% else %}
-        <p>None</p>
-    {% endif %}
+<h2>Incoming requests</h2>
+{% if pending_recv %}
+    <ul>
+    {% for item in pending_recv %}
+        <li>
+            <span class="item-name">{{ item.other.username }}</span>
+            <form method="post" action="{{ url_for('accept_connection', conn_id=item.conn.id) }}" style="display:inline;">
+                <button type="submit" class="inline-btn secondary">Accept</button>
+            </form>
+            <form method="post" action="{{ url_for('deny_connection', conn_id=item.conn.id) }}" style="display:inline;">
+                <button type="submit" class="inline-btn danger">Deny</button>
+            </form>
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <div class="empty">no incoming requests</div>
+{% endif %}
 
-    <h2>Accepted connections</h2>
-    {% if accepted %}
-        <ul>
-        {% for item in accepted %}
-            <li><a href="{{ url_for('chat_page', other_id=item.other.id) }}">Chat with {{ item.other.username }}</a></li>
-        {% endfor %}
-        </ul>
-    {% else %}
-        <p>None</p>
-    {% endif %}
+<h2>Active connections</h2>
+{% if accepted %}
+    <ul>
+    {% for item in accepted %}
+        <li>
+            <span class="item-name">{{ item.other.username }}</span>
+            <span class="badge badge-green">connected</span>
+            <a href="{{ url_for('chat_page', other_id=item.other.id) }}" style="margin-left:auto; font-size:0.82rem;">Open chat &rarr;</a>
+        </li>
+    {% endfor %}
+    </ul>
+{% else %}
+    <div class="empty">no active connections yet</div>
+{% endif %}
 {% endblock %}

@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Send Connection Request{% endblock %}
+{% block title %}Connect &mdash; GhostCache{% endblock %}
 
 {% block content %}
-    <h2>Send a connection request</h2>
-    <form method="post" action="{{ url_for('send_connection_request') }}">
-        <label for="username">Username of recipient</label>
-        <input type="text" name="username" id="username" required>
-        <button type="submit">Send request</button>
-    </form>
+<h2>Send Connection Request</h2>
+
+<form method="post" action="{{ url_for('send_connection_request') }}">
+    <label for="username">Agent username</label>
+    <input type="text" name="username" id="username" placeholder="enter exact username" required autofocus>
+    <button type="submit">Send Request &rarr;</button>
+</form>
 {% endblock %}

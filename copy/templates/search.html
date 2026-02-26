@@ -1,25 +1,28 @@
 {% extends "base.html" %}
 
-{% block title %}Search Users{% endblock %}
+{% block title %}Search &mdash; GhostCache{% endblock %}
 
 {% block content %}
-    <h2>Search for users</h2>
-    <form method="get" action="{{ url_for('search_users') }}">
-        <input type="text" name="q" value="{{ query }}" placeholder="username">
-        <button type="submit">Search</button>
-    </form>
-    {% if results %}
-        <ul>
-        {% for u in results %}
-            <li>{{ u.username }} 
-                <form method="post" action="{{ url_for('send_connection_request') }}" style="display:inline;">
-                    <input type="hidden" name="username" value="{{ u.username }}">
-                    <button type="submit">Connect</button>
-                </form>
-            </li>
-        {% endfor %}
-        </ul>
-    {% elif query %}
-        <p>No users found matching '{{ query }}'</p>
-    {% endif %}
+<h2>Find Agents</h2>
+
+<form method="get" action="{{ url_for('search_users') }}" class="search-form">
+    <input type="text" name="q" value="{{ query }}" placeholder="search by username..." autofocus>
+    <button type="submit">Search</button>
+</form>
+
+{% if results %}
+    <ul>
+    {% for u in results %}
+        <li>
+            <span class="item-name">{{ u.username }}</span>
+            <form method="post" action="{{ url_for('send_connection_request') }}" style="display:inline; margin-left:auto;">
+                <input type="hidden" name="username" value="{{ u.username }}">
+                <button type="submit" class="inline-btn secondary">&#43; Connect</button>
+            </form>
+        </li>
+    {% endfor %}
+    </ul>
+{% elif query %}
+    <div class="empty">no agents found matching "{{ query }}"</div>
+{% endif %}
 {% endblock %}
