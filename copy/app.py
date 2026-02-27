@@ -738,12 +738,54 @@ def _deny_view_only():
     return None
 
 
+# Replace the existing index() route in app.py with this:
+
 @app.route('/')
 def index():
     user = None
+    active_connections = []
+    pending_connections = []
+    recent_files = []
+
     if 'user_id' in session:
         user = User.query.get(session['user_id'])
-    return render_template('index.html', user=user)
+
+    if user and not session.get('view_only'):
+        uid = user.id
+
+        # Accepted connections with the other user object
+        accepted = Connection.query.filter(
+            ((Connection.sender_id == uid) | (Connection.receiver_id == uid)),
+            Connection.status == 'accepted'
+        ).order_by(Connection.created_at.desc()).all()
+
+        for conn in accepted:
+            other_id = conn.receiver_id if conn.sender_id == uid else conn.sender_id
+            other = User.query.get(other_id)
+            if other and not other.deleted:
+                active_connections.append({'conn': conn, 'other': other})
+
+        # Pending incoming requests
+        pending = Connection.query.filter_by(
+            receiver_id=uid, status='pending'
+        ).order_by(Connection.created_at.desc()).all()
+
+        for conn in pending:
+            other = User.query.get(conn.sender_id)
+            if other and not other.deleted:
+                pending_connections.append({'conn': conn, 'other': other})
+
+        # 3 most recent owned files
+        recent_files = File.query.filter_by(owner_id=uid)\
+            .order_by(File.created_at.desc()).limit(3).all()
+
+    return render_template(
+        'index.html',
+        user=user,
+        active_connections=active_connections,
+        pending_connections=pending_connections,
+        recent_files=recent_files,
+    )
 
 
 @app.route('/register', methods=['GET', 'POST'])

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}GhostCache — Secure Messaging{% endblock %}
+{% block title %}GhostCache{% endblock %}
 
 {% block content %}
 {% if user %}
@@ -11,96 +11,191 @@
   </div>
 </div>
 
-<div class="stat-row">
-  <a href="{{ url_for('list_connections') }}" class="stat-tile">
-    <div class="stat-label">connections</div>
-    <div class="stat-val">→</div>
-  </a>
-  <a href="{{ url_for('list_files') }}" class="stat-tile">
-    <div class="stat-label">encrypted files</div>
-    <div class="stat-val">→</div>
-  </a>
-  <a href="{{ url_for('search_users') }}" class="stat-tile">
-    <div class="stat-label">find users</div>
-    <div class="stat-val">→</div>
-  </a>
+<!-- Quick actions row -->
+<div class="flex gap-8" style="flex-wrap:wrap; margin-bottom:32px;">
+  <a href="{{ url_for('send_connection_request') }}" class="btn btn-primary">&#8853; new connection</a>
+  <a href="{{ url_for('upload_file') }}"             class="btn btn-ghost">&#8593; upload file</a>
+  <a href="{{ url_for('search_users') }}"            class="btn btn-ghost">&#8981; find users</a>
+  <a href="{{ url_for('password_change') }}"         class="btn btn-ghost">&#9881; change password</a>
 </div>
 
-<div class="flex gap-8" style="flex-wrap:wrap; margin-top:8px;">
-  <a href="{{ url_for('send_connection_request') }}" class="btn btn-primary">⊕ new connection</a>
-  <a href="{{ url_for('upload_file') }}"             class="btn btn-ghost">↑ upload file</a>
-  <a href="{{ url_for('password_change') }}"         class="btn btn-ghost">⚙ change password</a>
+<!-- Active chats — primary content -->
+{% if active_connections %}
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-head">
+    <span class="card-title">active chats</span>
+    <span class="badge badge-green">{{ active_connections|length }}</span>
+  </div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
+        <tr><th>user</th><th>connected since</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for item in active_connections %}
+        <tr>
+          <td>
+            <span class="text-acid">{{ item.other.username if item.other else '?' }}</span>
+            {% if item.other and item.other.visibility == 'hidden' %}
+              <span class="badge badge-dim" style="margin-left:6px;">hidden</span>
+            {% endif %}
+          </td>
+          <td class="text-dim text-xs">
+            {{ item.conn.created_at.strftime('%Y-%m-%d') if item.conn.created_at else '—' }}
+          </td>
+          <td style="text-align:right;">
+            <a href="{{ url_for('chat_page', other_id=item.other.id) }}"
+               class="btn btn-primary btn-sm">
+              open chat &rarr;
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </div>
+{% else %}
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-head"><span class="card-title">active chats</span></div>
+  <div class="empty-state">
+    no connections yet &mdash;
+    <a href="{{ url_for('send_connection_request') }}" class="text-acid">send a request</a>
+    or
+    <a href="{{ url_for('search_users') }}" class="text-acid">find users</a>
+  </div>
+</div>
+{% endif %}
+
+<!-- Pending incoming requests — surfaced here so users don't miss them -->
+{% if pending_connections %}
+<div class="card" style="margin-bottom:16px; border-color:rgba(240,165,0,0.3);">
+  <div class="card-head">
+    <span class="card-title" style="color:var(--amber);">&#9873; pending requests</span>
+    <span class="badge badge-amber">{{ pending_connections|length }}</span>
+  </div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>from</th><th>received</th><th>action</th></tr></thead>
+      <tbody>
+        {% for item in pending_connections %}
+        <tr>
+          <td class="text-acid">{{ item.other.username if item.other else '?' }}</td>
+          <td class="text-dim text-xs">
+            {{ item.conn.created_at.strftime('%Y-%m-%d') if item.conn.created_at else '—' }}
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('accept_connection', conn_id=item.conn.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-primary btn-sm">accept</button>
+            </form>
+            <form method="post" action="{{ url_for('deny_connection', conn_id=item.conn.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-danger btn-sm danger">deny</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- Files summary -->
+{% if recent_files %}
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-head">
+    <span class="card-title">recent files</span>
+    <a href="{{ url_for('list_files') }}" class="btn btn-ghost btn-sm">view all</a>
+  </div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>filename</th><th>expires</th><th></th></tr></thead>
+      <tbody>
+        {% for f in recent_files %}
+        <tr>
+          <td class="text-acid">{{ f.filename }}</td>
+          <td class="text-dim text-xs">{{ f.expiry.strftime('%Y-%m-%d') if f.expiry else '—' }}</td>
+          <td style="text-align:right;">
+            <a href="{{ url_for('download_file', file_id=f.id) }}" class="btn btn-ghost btn-sm">&#8595; download</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
 
 <hr style="margin-top:40px;">
 
-<!-- Destruction zone -->
-<div class="danger-zone" style="max-width:440px;">
-  <div class="danger-zone-title">⚠ destruction zone</div>
-  <p class="text-sm text-dim" style="margin-bottom:14px;">
-    Enter your destruction password to permanently and irreversibly delete this account and all its data.
-  </p>
-  <form method="post" action="{{ url_for('delete_account') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div class="form-group">
-      <label for="d_pass">destruction password</label>
-      <div class="pass-wrap">
-        <input type="password" name="d_pass" id="d_pass" required placeholder="••••••••">
-        <button type="button" class="eye-btn" onclick="togglePass('d_pass',this)">◉</button>
-      </div>
+<!-- Destruction zone — collapsed by default -->
+<div style="max-width:480px; margin-top:24px;">
+  <details>
+    <summary style="color:var(--red);">&#9888; destruction zone</summary>
+    <div class="details-body">
+      <p class="text-sm text-dim" style="margin-bottom:14px; line-height:1.6;">
+        Enter your destruction password to permanently and irreversibly delete this account and all its data.
+      </p>
+      <form method="post" action="{{ url_for('delete_account') }}" novalidate>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+          <label for="d_pass" class="required">destruction password</label>
+          <input type="password" name="d_pass" id="d_pass"
+                 required minlength="8" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"
+                 aria-describedby="dpass-warn">
+          <span class="field-hint" id="dpass-warn" style="color:var(--red);">
+            // this action cannot be undone
+          </span>
+        </div>
+        <button type="submit" class="btn btn-danger danger btn-sm"
+                onclick="return confirm('Permanently delete your account? This cannot be undone.')">
+          delete account permanently
+        </button>
+      </form>
     </div>
-    <button type="submit" class="danger btn btn-sm">delete account permanently</button>
-  </form>
+  </details>
 </div>
 
 {% else %}
-<!-- ── LANDING ── -->
+<!-- ── LANDING PAGE ── -->
 <div class="hero">
   <div class="hero-glow"></div>
-  <div class="hero-tag">// encrypted · ephemeral · invite-only</div>
+  <div class="hero-tag">// encrypted &middot; ephemeral &middot; invite-only</div>
   <h1 class="hero-title">Leave no <em>trace.</em></h1>
   <p class="hero-sub">
     GhostCache is an invite-only secure messaging platform. All messages
-    are end-to-end encrypted. One password logs you in — a second one
+    are end-to-end encrypted. One password logs you in &mdash; a second one
     vanishes your account forever.
   </p>
   <div class="hero-actions">
-    <a href="{{ url_for('register') }}" class="btn btn-primary btn-lg">request access →</a>
+    <a href="{{ url_for('register') }}" class="btn btn-primary">request access &rarr;</a>
     <a href="{{ url_for('login') }}"    class="btn btn-ghost">sign in</a>
   </div>
 </div>
 
 <div class="feature-grid">
   <div class="feature-tile">
-    <div class="feature-icon">🔐</div>
+    <div class="feature-icon">&#128272;</div>
     <div class="feature-name">End-to-End Encrypted</div>
     <div class="feature-desc">AES-GCM + ed25519 signatures. Only recipients can read messages.</div>
   </div>
   <div class="feature-tile">
-    <div class="feature-icon">💀</div>
+    <div class="feature-icon">&#128128;</div>
     <div class="feature-name">Destruction Password</div>
     <div class="feature-desc">A second password instantly and permanently destroys your account.</div>
   </div>
   <div class="feature-tile">
-    <div class="feature-icon">👁</div>
+    <div class="feature-icon">&#128065;</div>
     <div class="feature-name">Visibility Control</div>
     <div class="feature-desc">Hidden users don't appear in search. Stay invisible by default.</div>
   </div>
   <div class="feature-tile">
-    <div class="feature-icon">📁</div>
+    <div class="feature-icon">&#128193;</div>
     <div class="feature-name">Encrypted Files</div>
     <div class="feature-desc">Files are AES-GCM encrypted on disk. Shared securely per-user.</div>
   </div>
 </div>
 {% endif %}
-{% endblock %}
-
-{% block scripts %}
-<script>
-function togglePass(id, btn) {
-  const i = document.getElementById(id);
-  i.type = i.type === 'password' ? 'text' : 'password';
-  btn.textContent = i.type === 'password' ? '◉' : '◎';
-}
-</script>
 {% endblock %}
