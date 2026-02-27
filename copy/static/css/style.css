@@ -2,7 +2,46 @@
    GhostCache — Dark Terminal UI
    ============================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Syne:wght@400;600;700;800&display=swap');
+/* LOCAL FONTS — run download_fonts.py to populate static/fonts/ */
+@font-face {
+  font-family: 'Share Tech Mono';
+  font-style:  normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/ShareTechMono-Regular.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Syne';
+  font-style:  normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('../fonts/Syne-Regular.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Syne';
+  font-style:  normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('../fonts/Syne-SemiBold.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Syne';
+  font-style:  normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('../fonts/Syne-Bold.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Syne';
+  font-style:  normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('../fonts/Syne-ExtraBold.woff2') format('woff2');
+}
 
 :root {
   --bg:         #07090a;
