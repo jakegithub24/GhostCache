@@ -1,17 +1,48 @@
 {% extends "base.html" %}
-
-{% block title %}Login - GhostCache{% endblock %}
+{% block title %}Sign In — GhostCache{% endblock %}
 
 {% block content %}
-    <h2>Login to your account</h2>
-    <form method="post" action="{{ url_for('login') }}">
-        <label for="username">Username</label>
-        <input type="text" name="username" id="username" required>
+<div style="max-width:400px; margin:56px auto 0;">
+  <div style="text-align:center; margin-bottom:28px;">
+    <div style="font-family:var(--sans); font-weight:800; font-size:22px; letter-spacing:-0.5px;">Sign In</div>
+    <div class="text-dim text-sm" style="margin-top:6px;">authenticate to enter your cache</div>
+  </div>
 
-        <label for="password">Password</label>
-        <input type="password" name="password" id="password" required>
+  <div class="form-card">
+    <form method="post" action="{{ url_for('login') }}" autocomplete="off" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-        <button type="submit">Login</button>
+      <div class="form-group">
+        <label for="username" class="required">username</label>
+        <input type="text" name="username" id="username"
+               required autofocus
+               placeholder="your_handle"
+               autocomplete="username"
+               aria-describedby="username-hint"
+               minlength="1" maxlength="15"
+               pattern="[a-z][a-z0-9_]{0,14}">
+        <span class="field-hint" id="username-hint">// lowercase letters, digits, underscore</span>
+      </div>
+
+      <div class="form-group">
+        <label for="password" class="required">password</label>
+        <input type="password" name="password" id="password"
+               required
+               placeholder="••••••••"
+               autocomplete="current-password"
+               aria-describedby="password-hint"
+               minlength="8">
+        <span class="field-hint" id="password-hint">// using your destruction password will delete your account instantly</span>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-full" style="margin-top:16px;">
+        authenticate →
+      </button>
     </form>
-    <p>Don't have an account? <a href="{{ url_for('register') }}">Register here</a>.</p>
+  </div>
+
+  <p class="text-center text-sm text-dim" style="margin-top:18px;">
+    no account? <a href="{{ url_for('register') }}">request access</a>
+  </p>
+</div>
 {% endblock %}

@@ -1,12 +1,32 @@
 {% extends "base.html" %}
-
-{% block title %}Send Connection Request{% endblock %}
+{% block title %}New Connection — GhostCache{% endblock %}
 
 {% block content %}
-    <h2>Send a connection request</h2>
+<div style="max-width:440px; margin:56px auto 0;">
+  <div class="page-hd" style="justify-content:center; text-align:center; display:block; margin-bottom:28px;">
+    <h2>new conn<span>ection</span></h2>
+    <p>send a secure connection request to another user</p>
+  </div>
+
+  <div class="form-card">
     <form method="post" action="{{ url_for('send_connection_request') }}">
-        <label for="username">Username of recipient</label>
-        <input type="text" name="username" id="username" required>
-        <button type="submit">Send request</button>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="form-group">
+        <label for="username">recipient username</label>
+        <input type="text" name="username" id="username" required autofocus
+               placeholder="their_handle" autocomplete="off">
+        <p class="field-hint">// the user must accept your request before you can chat</p>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px;">
+        send request →
+      </button>
     </form>
+  </div>
+
+  <p class="text-center text-sm text-dim" style="margin-top:18px;">
+    <a href="{{ url_for('list_connections') }}">← back to connections</a>
+  </p>
+</div>
 {% endblock %}

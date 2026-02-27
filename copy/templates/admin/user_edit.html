@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Edit User — Admin{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div>
+    <h2>edit <span>{{ u.username }}</span></h2>
+    <p>
+      id: {{ u.id }} &nbsp;&middot;&nbsp;
+      joined: {{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '&mdash;' }} &nbsp;&middot;&nbsp;
+      last login: {{ u.last_login.strftime('%Y-%m-%d') if u.last_login else '&mdash;' }}
+    </p>
+  </div>
+  <a href="{{ url_for('admin_index') }}" class="btn btn-ghost btn-sm">&larr; admin</a>
+</div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; max-width:800px;">
+
+  <!-- Settings -->
+  <div class="card">
+    <div class="card-head"><span class="card-title">account settings</span></div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('admin_user_edit', user_id=u.id) }}" novalidate>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div class="form-group">
+          <label>visibility</label>
+          <select name="visibility">
+            <option value="visible" {% if u.visibility == 'visible' %}selected{% endif %}>visible &mdash; appears in search</option>
+            <option value="hidden"  {% if u.visibility == 'hidden'  %}selected{% endif %}>hidden &mdash; invisible to others</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:10px;text-transform:none;font-size:13px;cursor:pointer;">
+            <input type="checkbox" name="approved"
+                   {% if u.approved %}checked{% endif %}
+                   style="width:auto;padding:0;border:none;margin:0;box-shadow:none;accent-color:var(--acid);">
+            Approved
+          </label>
+        </div>
+
+        <div class="flex gap-8 items-center" style="margin-top:4px;">
+          <button type="submit" class="btn btn-primary btn-sm">save changes</button>
+          {% if u.deleted %}<span class="badge badge-red">deleted</span>{% endif %}
+          {% if u.force_password_change %}<span class="badge badge-amber">force pw change</span>{% endif %}
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Danger zone — collapsed by default via <details> -->
+  <div class="card" style="border-color:rgba(255,59,92,0.25);">
+    <div class="card-head" style="border-color:rgba(255,59,92,0.2);">
+      <span class="card-title text-red">danger zone</span>
+    </div>
+    <div class="card-body">
+      <details>
+        <summary style="color:var(--red);">&#9888; physical delete</summary>
+        <div class="details-body" style="padding-top:16px;">
+          <p class="text-sm text-dim" style="margin-bottom:16px; line-height:1.6;">
+            This is <strong style="color:var(--red);">irreversible</strong>. Removes the user
+            record and all owned files from disk permanently.
+          </p>
+          <form method="post" action="{{ url_for('admin_delete_user', user_id=u.id) }}" novalidate>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="form-group">
+              <label class="required">type DELETE to confirm</label>
+              <input type="text" name="confirm" required
+                     placeholder="DELETE"
+                     pattern="DELETE"
+                     title="Type the word DELETE in uppercase"
+                     autocomplete="off">
+            </div>
+
+            <div class="form-group">
+              <label class="required">admin password or MASTER_KEY</label>
+              <input type="password" name="auth" required placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;">
+            </div>
+
+            <button type="submit" class="btn btn-danger danger btn-sm"
+                    onclick="return confirm('Permanently and irreversibly delete {{ u.username }}?')">
+              &#9760; emergency physical delete
+            </button>
+          </form>
+        </div>
+      </details>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

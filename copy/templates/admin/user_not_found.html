@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}User Not Found — Admin{% endblock %}
+
+{% block content %}
+<div style="text-align:center; padding:80px 24px;">
+  <div style="font-family:var(--sans); font-weight:800; font-size:64px; color:var(--border2); letter-spacing:-3px;">404</div>
+  <div style="font-family:var(--sans); font-weight:700; font-size:20px; color:var(--text); margin:12px 0 8px;">User Not Found</div>
+  <p class="text-dim text-sm">This user record does not exist or has been removed.</p>
+  <a href="{{ url_for('admin_index') }}" class="btn btn-ghost" style="margin-top:24px;">← back to admin</a>
+</div>
+{% endblock %}

@@ -1,14 +1,42 @@
 {% extends "base.html" %}
-
-{% block title %}Upload File{% endblock %}
+{% block title %}Upload File — GhostCache{% endblock %}
 
 {% block content %}
-    <h2>Upload and encrypt file</h2>
+<div style="max-width:480px; margin:56px auto 0;">
+  <div style="text-align:center; margin-bottom:28px;">
+    <h2 style="font-family:var(--sans); font-weight:800; font-size:22px; letter-spacing:-0.5px;">
+      Upload <span style="color:var(--acid);">Encrypted</span> File
+    </h2>
+    <p class="text-dim text-sm" style="margin-top:6px;">
+      Files are AES-GCM encrypted before being stored on disk
+    </p>
+  </div>
+
+  <div class="form-card">
     <form method="post" action="{{ url_for('upload_file') }}" enctype="multipart/form-data">
-        <label for="file">Select file</label>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="form-group">
+        <label for="file">select file</label>
         <input type="file" name="file" id="file" required>
-        <label for="expiry_days">Expiry (days, max 365)</label>
-        <input type="number" name="expiry_days" id="expiry_days" value="30" min="1" max="365">
-        <button type="submit">Upload</button>
+        <p class="field-hint">// max 50 MB per file</p>
+      </div>
+
+      <div class="form-group">
+        <label for="expiry_days">expiry (days)</label>
+        <input type="number" name="expiry_days" id="expiry_days"
+               value="30" min="1" max="365" required>
+        <p class="field-hint">// 1–365 days · file auto-deletes after expiry</p>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px;">
+        encrypt &amp; upload →
+      </button>
     </form>
+  </div>
+
+  <p class="text-center text-sm text-dim" style="margin-top:18px;">
+    <a href="{{ url_for('list_files') }}">← back to files</a>
+  </p>
+</div>
 {% endblock %}

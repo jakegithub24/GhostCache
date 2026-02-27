@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Pending Approvals — Admin{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div>
+    <h2>pending <span>approvals</span></h2>
+    <p>review and approve registration requests</p>
+  </div>
+  <a href="{{ url_for('admin_index') }}" class="btn btn-ghost btn-sm">← admin</a>
+</div>
+
+<div class="card">
+  {% if users %}
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
+        <tr><th>username</th><th>registered</th><th>action</th></tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td class="text-acid">{{ u.username }}</td>
+          <td class="text-dim text-xs">{{ u.created_at.strftime('%Y-%m-%d %H:%M') if u.created_at else '—' }}</td>
+          <td>
+            <form method="post" action="{{ url_for('admin_approve', user_id=u.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-primary btn-sm">✓ approve</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">no pending approvals</div>
+  {% endif %}
+</div>
+{% endblock %}

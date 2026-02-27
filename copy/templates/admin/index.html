@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Admin Console — GhostCache{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div>
+    <h2>admin <span>console</span></h2>
+    <p>// restricted access — admin only</p>
+  </div>
+</div>
+
+<div class="admin-grid">
+  <a href="{{ url_for('admin_pending') }}" class="admin-tile">
+    <div class="admin-tile-icon">⏳</div>
+    <div class="admin-tile-name">Pending Approvals</div>
+    <div class="admin-tile-desc">Review and approve registration requests</div>
+  </a>
+  <a href="{{ url_for('admin_create_user') }}" class="admin-tile">
+    <div class="admin-tile-icon">⊕</div>
+    <div class="admin-tile-name">Create User</div>
+    <div class="admin-tile-desc">Manually create a new account with temp password</div>
+  </a>
+  <a href="{{ url_for('admin_notifications') }}" class="admin-tile">
+    <div class="admin-tile-icon">🔔</div>
+    <div class="admin-tile-name">Notifications</div>
+    <div class="admin-tile-desc">Review system alerts and hidden-user events</div>
+  </a>
+  <a href="{{ url_for('index') }}" class="admin-tile" style="opacity:0.5;">
+    <div class="admin-tile-icon">←</div>
+    <div class="admin-tile-name">Back to Site</div>
+    <div class="admin-tile-desc">Return to the main interface</div>
+  </a>
+</div>
+{% endblock %}
