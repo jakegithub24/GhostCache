@@ -173,7 +173,12 @@ All input endpoints accept form-encoded data from HTML forms; JSON is also suppo
 
 Authentication & session handling
 ------------------------------
-- The app uses Flask sessions (`app.secret_key` set at start). For local/testing, `app.secret_key` uses `os.urandom(24)` — meaning sessions are reset on each restart. In production, set a stable, secure `SECRET_KEY`.
+- The app uses Flask sessions (`app.secret_key` set at start). A stable `SECRET_KEY` is **required** for encryption keys to remain usable across restarts.
+  If `SECRET_KEY` is not provided via the environment, the server will automatically generate
+  one on first run and save it to a file named `.secret_key` in the project root. Do **not** delete
+  this file or the encryption of existing data (including chat keys) will break and users will see
+  “chat key unavailable” errors. When deploying, prefer setting `SECRET_KEY` explicitly in `.env` or
+  your configuration.
 - Session keys used: `user_id` and `username`.
 
 File storage and upload flow (detailed)

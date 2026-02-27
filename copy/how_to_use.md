@@ -79,7 +79,11 @@ curl -X POST -H "Content-Type: application/json" -d '{"username":"alice","passwo
 - For permission/file-not-found problems with downloads, check that the uploaded file exists under `uploads/` and that the `File` DB record has the correct `stored_name` and `owner_id`.
 
 ## Security notes
-- This app uses Argon2 for password hashing and Fernet for symmetric encryption in local/test mode. Do not expose the development secret key in production.
+- This app uses Argon2 for password hashing and Fernet for symmetric encryption in local/test mode.
+  **Secret persistence:** the first time you run the server without a `SECRET_KEY` environment variable,
+  it will create a `.secret_key` file in the project root and reuse that key on subsequent starts. Keep
+  that file safe; deleting it will invalidate existing encrypted user keys and chat connections, leading
+  to errors such as “chat key unavailable”. You can instead set `SECRET_KEY` in `.env` for explicit control.
 - `app.secret_key` is randomized on each start for local testing. For a persistent deployment, set a fixed secure secret key.
 
 ## Next steps / extensions

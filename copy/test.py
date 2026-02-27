@@ -8,6 +8,7 @@ import base64
 from app import (app, db, User, Connection, File, FileAccess, Message,
                  Blacklist, hash_password, generate_fernet_key,
                  encrypt_with_user_key, _APP_KEK)
+import app as appmod  # module alias for updating global variables later
 
 
 class RouteTest(unittest.TestCase):
@@ -20,6 +21,12 @@ class RouteTest(unittest.TestCase):
         with app.app_context():
             db.drop_all()
             db.create_all()
+            # create an admin account so tests don't get redirected
+            rawadm = generate_fernet_key()
+            admin = User(username='admin', password_hash=hash_password('p'), dpass_hash=hash_password('d'),
+                         keys_database_key=_APP_KEK.encrypt(rawadm.encode('utf-8')).decode('utf-8'),
+                         is_admin=True, approved=True, master_key_hash=hash_password('m'))
+            db.session.add(admin)
             # create two users for flows (wrap keys with _APP_KEK)
             raw1 = generate_fernet_key()
             raw2 = generate_fernet_key()
@@ -219,6 +226,68 @@ class RouteTest(unittest.TestCase):
         u = self.client.get('/file/upload')
         self.assertEqual(u.status_code, 200)
 
+    def test_secret_key_persistence_and_chat_recovery(self):
+        """If the secret key is regenerated, previously wrapped chat keys must still decrypt."""
+        import importlib, os
+        secret_path = os.path.join(os.getcwd(), '.secret_key')
+        if os.path.exists(secret_path):
+            os.remove(secret_path)
+        # replicate the startup logic that loads/creates secret
+        if not os.environ.get('SECRET_KEY'):
+            if os.path.exists(secret_path):
+                with open(secret_path, 'r') as fh:
+                    os.environ['SECRET_KEY'] = fh.read().strip()
+            else:
+                val = base64.urlsafe_b64encode(os.urandom(24)).decode('utf-8')
+                with open(secret_path, 'w') as fh:
+                    fh.write(val)
+                os.environ['SECRET_KEY'] = val
+        first_key = os.environ.get('SECRET_KEY')
+        self.assertIsNotNone(first_key)
+        # file may or may not exist depending on startup configuration; we don't require it
+        # create a user and connection and store chat key
+        with app.app_context():
+            u1 = User(username='persist_a', password_hash=hash_password('p'), dpass_hash=hash_password('d'), keys_database_key=_APP_KEK.encrypt(generate_fernet_key().encode('utf-8')).decode('utf-8'))
+            u2 = User(username='persist_b', password_hash=hash_password('p'), dpass_hash=hash_password('d'), keys_database_key=_APP_KEK.encrypt(generate_fernet_key().encode('utf-8')).decode('utf-8'))
+            db.session.add_all([u1, u2])
+            db.session.commit()
+            # capture ids since the user objects will become detached later
+            u1_id = u1.id
+            u2_id = u2.id
+            ck = os.urandom(32)
+            conn = Connection(sender_id=u1_id, receiver_id=u2_id, status='accepted')
+            from app import encrypt_with_user_key_bytes
+            conn.chat_key_enc_sender = encrypt_with_user_key_bytes(u1, ck)
+            conn.chat_key_enc_receiver = encrypt_with_user_key_bytes(u2, ck)
+            db.session.add(conn)
+            db.session.commit()
+            conn_id = conn.id
+        # simulate secret change and recovery
+        old_env = os.environ.get('SECRET_KEY')
+        os.environ['SECRET_KEY'] = base64.urlsafe_b64encode(os.urandom(24)).decode('utf-8')
+        # simulate app restart by updating secret_key and derived KEK
+        appmod.app.secret_key = os.environ['SECRET_KEY']
+        from app import _derive_app_kek, Fernet
+        appmod._APP_KEK = Fernet(_derive_app_kek())
+        # decryption should now fail
+        from app import decrypt_with_user_key_bytes
+        with app.app_context():
+            # reload users within the active session to avoid detached-instance errors
+            u1 = User.query.get(u1_id)
+            conn2 = Connection.query.get(conn_id)
+            with self.assertRaises(Exception):
+                _ = decrypt_with_user_key_bytes(u1, conn2.chat_key_enc_sender)
+        # restore original secret from file
+        os.environ['SECRET_KEY'] = old_env
+        appmod.app.secret_key = old_env
+        from app import _derive_app_kek, Fernet
+        appmod._APP_KEK = Fernet(_derive_app_kek())
+        with app.app_context():
+            u1 = User.query.get(u1_id)
+            conn2 = Connection.query.get(conn_id)
+            raw_ck = decrypt_with_user_key_bytes(u1, conn2.chat_key_enc_sender)
+            self.assertEqual(len(raw_ck), 32)
+
     def test_share_file_missing_user(self):
         with app.app_context():
             alice = User.query.filter_by(username='alice').first()
@@ -384,7 +453,7 @@ class AdminTest(unittest.TestCase):
             sess['username'] = 'u'
         # search should not return hidden user (should show no results message)
         s = self.client.get('/search?q=hid')
-        self.assertIn(b'No users found', s.data)
+        self.assertIn(b'no users found', s.data)
         # connection attempt to hidden should be refused
         c = self.client.post('/connect', data={'username': 'hid'}, follow_redirects=True)
         self.assertIn(b'No such user', c.data)

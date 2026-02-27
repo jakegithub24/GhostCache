@@ -3,54 +3,38 @@
 {% block title %}Chat with {{ other_username }}{% endblock %}
 
 {% block content %}
-    <h2>Chat with {{ other_username }}</h2>
-    <div class="chat-window">
-        {% for m in messages %}
-            <div class="msg {{ 'sent' if m.sender_id == session.user_id else 'recv' }}">
-                <span class="who">{{ 'You' if m.sender_id == session.user_id else other_username }}:</span>
-                <span class="text">{{ m.content }}</span>
-                <span class="ts">{{ m.timestamp }}</span>
-            </div>
-        {% endfor %}
-    </div>
-    <a href="{{ url_for('list_connections') }}" class="btn btn-ghost btn-sm">&larr; back</a>
-  </div>
+<h2>Chat with {{ other_username }}</h2>
 
-  <!-- overflow-anchor on .chat-scroll-anchor keeps view at bottom without JS -->
-  <div class="chat-messages" role="log" aria-live="polite" aria-label="chat messages">
+<div class="chat-messages" role="log" aria-live="polite" aria-label="chat messages">
     {% if not messages %}
-      <div class="empty-state" style="margin:auto;">no messages yet &mdash; send the first one</div>
+    <div class="empty-state" style="margin:auto;">no messages yet &mdash; send the first one</div>
     {% endif %}
     {% for m in messages %}
-      <div class="msg {{ 'sent' if m.sender_id == session.user_id else 'recv' }}">
+    <div class="msg {{ 'sent' if m.sender_id == session.user_id else 'recv' }}">
         <div class="msg-bubble">{{ m.content }}</div>
         <div class="msg-meta">
-          {% if m.sender_id != session.user_id %}
-            <span class="msg-who">user #{{ m.sender_id }}</span>
-          {% endif %}
-          <time datetime="{{ m.timestamp.isoformat() if m.timestamp else '' }}">
-            {{ m.timestamp.strftime('%H:%M') if m.timestamp else '' }}
-          </time>
+            <time datetime="{{ m.timestamp.isoformat() if m.timestamp else '' }}">
+                {{ m.timestamp.strftime('%H:%M') if m.timestamp else '' }}
+            </time>
         </div>
-      </div>
+    </div>
     {% endfor %}
     <!-- Anchor element: browser keeps this in view = auto-scroll to bottom -->
     <div class="chat-scroll-anchor" aria-hidden="true"></div>
-  </div>
+</div>
 
-  <div class="chat-form">
+<!-- Back link -->
+<div class="back-link">
+    <a href="{{ url_for('list_connections') }}" class="btn btn-ghost btn-sm">&larr; back</a>
+</div>
+
+<!-- Message input form -->
+<div class="chat-form">
     <form method="post" action="{{ url_for('chat_page', other_id=other_id) }}" style="display:contents;">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="text" name="message"
-             placeholder="type a message and press Send…"
-             required
-             autofocus
-             autocomplete="off"
-             maxlength="4000"
-             aria-label="message input">
-      <button type="submit" class="btn btn-primary">send &rarr;</button>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text" name="message" placeholder="type a message and press Send…" required autofocus
+            autocomplete="off" maxlength="4000" aria-label="message input">
+        <button type="submit" class="btn btn-primary">send &rarr;</button>
     </form>
-  </div>
-
 </div>
 {% endblock %}

@@ -66,6 +66,24 @@ def _load_dotenv_if_present(path: str = ".env") -> None:
 # Load .env early so environment variables (ADMIN_*, DATABASE_URL, etc.) are available
 _load_dotenv_if_present()
 
+# ensure SECRET_KEY is stable across restarts; if not provided, persist one to a file
+_secret_file = os.path.join(os.getcwd(), ".secret_key")
+if not os.environ.get("SECRET_KEY"):
+    if os.path.exists(_secret_file):
+        try:
+            with open(_secret_file, "r") as fh:
+                os.environ["SECRET_KEY"] = fh.read().strip()
+        except Exception:
+            pass
+    else:
+        # generate and save
+        val = base64.urlsafe_b64encode(os.urandom(24)).decode("utf-8")
+        try:
+            with open(_secret_file, "w") as fh:
+                fh.write(val)
+        except Exception:
+            pass
+        os.environ["SECRET_KEY"] = val
 
 # --- Flask App Setup ---
 
