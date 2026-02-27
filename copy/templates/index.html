@@ -1,20 +1,106 @@
 {% extends "base.html" %}
-
-{% block title %}Home - GhostCache{% endblock %}
+{% block title %}GhostCache — Secure Messaging{% endblock %}
 
 {% block content %}
-    {% if user %}
-        <h2>Welcome, {{ user.username }}!</h2>
-        <p>Last login: {{ user.last_login }}</p>
-        <p><a href="{{ url_for('send_connection_request') }}">Send connection request</a> | <a href="{{ url_for('list_connections') }}">Manage connections</a></p>
-        <form method="post" action="{{ url_for('delete_account') }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <label for="d_pass">Destruction password</label>
-            <input type="password" name="d_pass" id="d_pass" required>
-            <button type="submit" class="danger">Delete Account</button>
-        </form>
-    {% else %}
-        <h2>Welcome to GhostCache</h2>
-        <p>Please <a href="{{ url_for('login') }}">login</a> or <a href="{{ url_for('register') }}">register</a> to continue.</p>
-    {% endif %}
+{% if user %}
+<!-- ── LOGGED IN DASHBOARD ── -->
+<div class="page-hd">
+  <div>
+    <h2>welcome, <span>{{ user.username }}</span></h2>
+    <p>last login: {{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else '—' }} &nbsp;·&nbsp; all channels encrypted</p>
+  </div>
+</div>
+
+<div class="stat-row">
+  <a href="{{ url_for('list_connections') }}" class="stat-tile">
+    <div class="stat-label">connections</div>
+    <div class="stat-val">→</div>
+  </a>
+  <a href="{{ url_for('list_files') }}" class="stat-tile">
+    <div class="stat-label">encrypted files</div>
+    <div class="stat-val">→</div>
+  </a>
+  <a href="{{ url_for('search_users') }}" class="stat-tile">
+    <div class="stat-label">find users</div>
+    <div class="stat-val">→</div>
+  </a>
+</div>
+
+<div class="flex gap-8" style="flex-wrap:wrap; margin-top:8px;">
+  <a href="{{ url_for('send_connection_request') }}" class="btn btn-primary">⊕ new connection</a>
+  <a href="{{ url_for('upload_file') }}"             class="btn btn-ghost">↑ upload file</a>
+  <a href="{{ url_for('password_change') }}"         class="btn btn-ghost">⚙ change password</a>
+</div>
+
+<hr style="margin-top:40px;">
+
+<!-- Destruction zone -->
+<div class="danger-zone" style="max-width:440px;">
+  <div class="danger-zone-title">⚠ destruction zone</div>
+  <p class="text-sm text-dim" style="margin-bottom:14px;">
+    Enter your destruction password to permanently and irreversibly delete this account and all its data.
+  </p>
+  <form method="post" action="{{ url_for('delete_account') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-group">
+      <label for="d_pass">destruction password</label>
+      <div class="pass-wrap">
+        <input type="password" name="d_pass" id="d_pass" required placeholder="••••••••">
+        <button type="button" class="eye-btn" onclick="togglePass('d_pass',this)">◉</button>
+      </div>
+    </div>
+    <button type="submit" class="danger btn btn-sm">delete account permanently</button>
+  </form>
+</div>
+
+{% else %}
+<!-- ── LANDING ── -->
+<div class="hero">
+  <div class="hero-glow"></div>
+  <div class="hero-tag">// encrypted · ephemeral · invite-only</div>
+  <h1 class="hero-title">Leave no <em>trace.</em></h1>
+  <p class="hero-sub">
+    GhostCache is an invite-only secure messaging platform. All messages
+    are end-to-end encrypted. One password logs you in — a second one
+    vanishes your account forever.
+  </p>
+  <div class="hero-actions">
+    <a href="{{ url_for('register') }}" class="btn btn-primary btn-lg">request access →</a>
+    <a href="{{ url_for('login') }}"    class="btn btn-ghost">sign in</a>
+  </div>
+</div>
+
+<div class="feature-grid">
+  <div class="feature-tile">
+    <div class="feature-icon">🔐</div>
+    <div class="feature-name">End-to-End Encrypted</div>
+    <div class="feature-desc">AES-GCM + ed25519 signatures. Only recipients can read messages.</div>
+  </div>
+  <div class="feature-tile">
+    <div class="feature-icon">💀</div>
+    <div class="feature-name">Destruction Password</div>
+    <div class="feature-desc">A second password instantly and permanently destroys your account.</div>
+  </div>
+  <div class="feature-tile">
+    <div class="feature-icon">👁</div>
+    <div class="feature-name">Visibility Control</div>
+    <div class="feature-desc">Hidden users don't appear in search. Stay invisible by default.</div>
+  </div>
+  <div class="feature-tile">
+    <div class="feature-icon">📁</div>
+    <div class="feature-name">Encrypted Files</div>
+    <div class="feature-desc">Files are AES-GCM encrypted on disk. Shared securely per-user.</div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function togglePass(id, btn) {
+  const i = document.getElementById(id);
+  i.type = i.type === 'password' ? 'text' : 'password';
+  btn.textContent = i.type === 'password' ? '◉' : '◎';
+}
+</script>
 {% endblock %}

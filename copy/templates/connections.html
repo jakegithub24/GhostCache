@@ -1,47 +1,107 @@
 {% extends "base.html" %}
-
-{% block title %}Your Connections{% endblock %}
+{% block title %}Connections — GhostCache{% endblock %}
 
 {% block content %}
-    <h2>Pending requests you've sent</h2>
-    {% if pending_sent %}
-        <ul>
-        {% for item in pending_sent %}
-            <li>{{ item.other.username }} (pending)</li>
-        {% endfor %}
-        </ul>
-    {% else %}
-        <p>None</p>
-    {% endif %}
+<div class="page-hd">
+  <div>
+    <h2>conn<span>ections</span></h2>
+    <p>manage your secure channels</p>
+  </div>
+  <a href="{{ url_for('send_connection_request') }}" class="btn btn-primary">⊕ new request</a>
+</div>
 
-    <h2>Pending requests you've received</h2>
-    {% if pending_recv %}
-        <ul>
+<!-- Incoming requests -->
+{% if pending_recv %}
+<div class="card" style="border-color:rgba(240,165,0,0.3); margin-bottom:16px;">
+  <div class="card-head">
+    <span class="card-title" style="color:var(--amber);">⚑ incoming requests</span>
+    <span class="badge badge-amber">{{ pending_recv|length }}</span>
+  </div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>from</th><th>received</th><th>action</th></tr></thead>
+      <tbody>
         {% for item in pending_recv %}
-            <li>{{ item.other.username }}
-                <form method="post" action="{{ url_for('accept_connection', conn_id=item.conn.id) }}" style="display:inline;">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit">Accept</button>
-                </form>
-                <form method="post" action="{{ url_for('deny_connection', conn_id=item.conn.id) }}" style="display:inline;">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit">Deny</button>
-                </form>
-            </li>
+        <tr>
+          <td class="text-acid">{{ item.other.username if item.other else '?' }}</td>
+          <td class="text-dim text-xs">{{ item.conn.created_at.strftime('%Y-%m-%d') if item.conn.created_at else '—' }}</td>
+          <td>
+            <form method="post" action="{{ url_for('accept_connection', conn_id=item.conn.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-primary btn-sm">accept</button>
+            </form>
+            <form method="post" action="{{ url_for('deny_connection', conn_id=item.conn.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-danger btn-sm danger">deny</button>
+            </form>
+          </td>
+        </tr>
         {% endfor %}
-        </ul>
-    {% else %}
-        <p>None</p>
-    {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
 
-    <h2>Accepted connections</h2>
-    {% if accepted %}
-        <ul>
+<!-- Active connections -->
+{% if accepted %}
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-head">
+    <span class="card-title">active channels</span>
+    <span class="badge badge-green">{{ accepted|length }}</span>
+  </div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>user</th><th>established</th><th>action</th></tr></thead>
+      <tbody>
         {% for item in accepted %}
-            <li><a href="{{ url_for('chat_page', other_id=item.other.id) }}">Chat with {{ item.other.username }}</a></li>
+        <tr>
+          <td>
+            <span class="text-acid">{{ item.other.username if item.other else '?' }}</span>
+            {% if item.other and item.other.visibility == 'hidden' %}
+              <span class="badge badge-dim" style="margin-left:6px;">hidden</span>
+            {% endif %}
+          </td>
+          <td class="text-dim text-xs">{{ item.conn.created_at.strftime('%Y-%m-%d') if item.conn.created_at else '—' }}</td>
+          <td>
+            <a href="{{ url_for('chat_page', other_id=item.other.id) }}" class="btn btn-ghost btn-sm">↗ open chat</a>
+          </td>
+        </tr>
         {% endfor %}
-        </ul>
-    {% else %}
-        <p>None</p>
-    {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- Sent / pending -->
+{% if pending_sent %}
+<div class="card">
+  <div class="card-head">
+    <span class="card-title text-dim" style="font-size:13px;">sent · awaiting response</span>
+    <span class="badge badge-dim">{{ pending_sent|length }}</span>
+  </div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>to</th><th>sent</th><th>status</th></tr></thead>
+      <tbody>
+        {% for item in pending_sent %}
+        <tr>
+          <td class="text-dim">{{ item.other.username if item.other else '?' }}</td>
+          <td class="text-dim text-xs">{{ item.conn.created_at.strftime('%Y-%m-%d') if item.conn.created_at else '—' }}</td>
+          <td><span class="badge badge-dim">pending</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if not accepted and not pending_recv and not pending_sent %}
+<div class="empty-state">
+  no connections yet —
+  <a href="{{ url_for('send_connection_request') }}" class="text-acid">send a request</a>
+</div>
+{% endif %}
 {% endblock %}

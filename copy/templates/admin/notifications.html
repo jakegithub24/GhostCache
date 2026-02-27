@@ -1,24 +1,51 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Admin Notifications</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-  </head>
-  <body>
-    <h1>Notifications</h1>
-    <ul>
-      {% for n in notes %}
-        <li>[{% if n.read %}read{% else %}unread{% endif %}] {{ n.created_at }} — {{ n.message }}
-          <form method="post" action="/admin/notifications/{{ n.id }}/read" style="display:inline">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit">Mark read</button>
-          </form>
-        </li>
-      {% else %}
-        <li>No notifications.</li>
-      {% endfor %}
-    </ul>
-    <p><a href="/admin">Back</a></p>
-  </body>
-</html>
+{% extends "base.html" %}
+{% block title %}Notifications — Admin{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div>
+    <h2>system <span>notifications</span></h2>
+    <p>hidden-user events and system alerts</p>
+  </div>
+  <a href="{{ url_for('admin_index') }}" class="btn btn-ghost btn-sm">← admin</a>
+</div>
+
+<div class="card">
+  {% if notes %}
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead>
+        <tr><th>status</th><th>time</th><th>message</th><th>action</th></tr>
+      </thead>
+      <tbody>
+        {% for n in notes %}
+        <tr>
+          <td>
+            {% if n.read %}
+              <span class="badge badge-dim">read</span>
+            {% else %}
+              <span class="badge badge-amber">unread</span>
+            {% endif %}
+          </td>
+          <td class="text-dim text-xs" style="white-space:nowrap;">
+            {{ n.created_at.strftime('%Y-%m-%d %H:%M') if n.created_at else '—' }}
+          </td>
+          <td class="text-dim text-sm">{{ n.message }}</td>
+          <td>
+            {% if not n.read %}
+            <form method="post" action="{{ url_for('admin_mark_notification_read', note_id=n.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-ghost btn-sm">mark read</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">no notifications</div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -872,11 +872,7 @@ def login():
             # Allow user to authenticate and see a temporary informational page
             session.clear()
             session['pending_user'] = user.username
-            return (
-                "<h2>Admin approval pending</h2>"
-                "<p>Admin approval is pending, check after some time</p>"
-                "<p><a href='" + url_for('logout') + "'>Logout</a></p>"
-            )
+            return render_template('pending_approval.html', username=user.username)
 
         # Normal approved user login
         session.clear()
@@ -914,31 +910,22 @@ def password_change():
     need = _require_login()
     if need:
         return need
-    if request.method == "GET":
-        # Minimal form returned directly to avoid adding templates.
-        return (
-            "<h2>Change password</h2>"
-            "<form method='post'>"
-            "<input type='hidden' name='csrf_token' value='" + _get_session_csrf_token() + "'>"
-            "<label>Current password</label><input type='password' name='old_password' required><br>"
-            "<label>New password</label><input type='password' name='password' required><br>"
-            "<label>New destruction password</label><input type='password' name='d_pass' required><br>"
-            "<button type='submit'>Update</button>"
-            "</form>"
-        )
-
-    deny = _deny_view_only()
-    if deny:
-        return deny
 
     user = _current_user()
     if not user:
         session.clear()
         return redirect(url_for("login"))
 
+    if request.method == "GET":
+        return render_template('password_change.html', force=user.force_password_change)
+
+    deny = _deny_view_only()
+    if deny:
+        return deny
+
     old_password = request.form.get("old_password") or ""
     new_password = request.form.get("password") or ""
-    new_dpass = request.form.get("d_pass") or ""
+    new_dpass    = request.form.get("d_pass") or ""
 
     if not verify_password(user.password_hash, old_password):
         flash("Current password is incorrect.", "error")
@@ -948,13 +935,14 @@ def password_change():
     if not ok_p:
         flash(msg_p, "error")
         return redirect(url_for("password_change"))
+
     ok_d, msg_d = validate_password(new_dpass, username=user.username)
     if not ok_d:
         flash(f"Destruction password: {msg_d}", "error")
         return redirect(url_for("password_change"))
 
     user.password_hash = hash_password(new_password)
-    user.dpass_hash = hash_password(new_dpass)
+    user.dpass_hash    = hash_password(new_dpass)
     user.force_password_change = False
     db.session.commit()
     flash("Password updated.", "success")

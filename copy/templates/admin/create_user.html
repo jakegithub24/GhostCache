@@ -1,20 +1,43 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Create User — Admin</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-  </head>
-  <body>
-    <h1>Create User</h1>
-    <form method="post">
+{% extends "base.html" %}
+{% block title %}Create User — Admin{% endblock %}
+
+{% block content %}
+<div style="max-width:440px; margin:0 auto;">
+  <div class="page-hd" style="display:block; margin-bottom:28px;">
+    <h2>create <span>user</span></h2>
+    <p>manually create an approved account with a temporary password</p>
+  </div>
+
+  <div class="form-card">
+    <form method="post" action="{{ url_for('admin_create_user') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <label>Username</label>
-      <input name="username" required><br>
-      <label>Visibility</label>
-      <select name="visibility"><option value="visible">visible</option><option value="hidden">hidden</option></select><br>
-      <button type="submit">Create</button>
+
+      <div class="form-group">
+        <label for="username">username</label>
+        <input type="text" name="username" id="username" required autofocus
+               placeholder="new_user_handle"
+               pattern="[a-z][a-z0-9_]{0,14}">
+        <p class="field-hint">// 1–15 chars, lowercase, start with letter</p>
+      </div>
+
+      <div class="form-group">
+        <label for="visibility">visibility</label>
+        <select name="visibility" id="visibility">
+          <option value="visible">visible — appears in search</option>
+          <option value="hidden">hidden — invisible to other users</option>
+        </select>
+      </div>
+
+      <div style="background:rgba(0,229,255,0.05); border:1px solid rgba(0,229,255,0.15); border-radius:var(--r); padding:10px 14px; font-size:12px; color:var(--text-dim); margin-bottom:16px; line-height:1.5;">
+        ℹ A temporary password will be generated. The user will be forced to change it on first login.
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-full">create account →</button>
     </form>
-    <p><a href="/admin">Back</a></p>
-  </body>
-</html>
+  </div>
+
+  <p class="text-center text-sm text-dim" style="margin-top:18px;">
+    <a href="{{ url_for('admin_index') }}">← admin console</a>
+  </p>
+</div>
+{% endblock %}
