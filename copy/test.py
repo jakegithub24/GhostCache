@@ -23,9 +23,31 @@ class RouteTest(unittest.TestCase):
             db.create_all()
             # create an admin account so tests don't get redirected
             rawadm = generate_fernet_key()
+            # create an admin account so tests don't get redirected
+            # also generate ed25519 signing keys so the admin can participate in chat
+            from cryptography.hazmat.primitives.asymmetric import ed25519 as _ed
+            privA = _ed.Ed25519PrivateKey.generate()
+            pubA = privA.public_key()
+            try:
+                privA_raw = privA.private_bytes_raw()
+                pubA_raw = pubA.public_bytes_raw()
+            except Exception:
+                from cryptography.hazmat.primitives import serialization
+                privA_raw = privA.private_bytes(
+                    encoding=serialization.Encoding.Raw,
+                    format=serialization.PrivateFormat.Raw,
+                    encryption_algorithm=serialization.NoEncryption(),
+                )
+                pubA_raw = pubA.public_bytes(
+                    encoding=serialization.Encoding.Raw,
+                    format=serialization.PublicFormat.Raw,
+                )
+            ed_privA_enc = Fernet(rawadm.encode('utf-8')).encrypt(privA_raw).decode('utf-8')
+            ed_pubA_b64 = base64.urlsafe_b64encode(pubA_raw).decode('utf-8')
             admin = User(username='admin', password_hash=hash_password('p'), dpass_hash=hash_password('d'),
                          keys_database_key=_APP_KEK.encrypt(rawadm.encode('utf-8')).decode('utf-8'),
-                         is_admin=True, approved=True, master_key_hash=hash_password('m'))
+                         is_admin=True, approved=True, master_key_hash=hash_password('m'),
+                         ed25519_pub_b64=ed_pubA_b64, ed25519_priv_enc=ed_privA_enc)
             db.session.add(admin)
             # create two users for flows (wrap keys with _APP_KEK)
             raw1 = generate_fernet_key()
@@ -180,6 +202,65 @@ class RouteTest(unittest.TestCase):
         r = self.client.get(f'/chat/{alice_id}')
         self.assertIn(b'hello', r.data)
 
+    def test_admin_can_send_messages(self):
+        """Admin user should be able to send and receive chat messages like others."""
+        with app.app_context():
+            admin = User.query.filter_by(username='admin').first()
+            alice = User.query.filter_by(username='alice').first()
+            # ensure both have signing keys
+            self.assertTrue(admin.ed25519_priv_enc and admin.ed25519_pub_b64)
+            self.assertTrue(alice.ed25519_priv_enc and alice.ed25519_pub_b64)
+            # create connection between admin and alice
+            conn = Connection(sender_id=admin.id, receiver_id=alice.id, status='accepted')
+            chat_key = generate_fernet_key()
+            conn.chat_key_enc_sender = encrypt_with_user_key(admin, chat_key)
+            conn.chat_key_enc_receiver = encrypt_with_user_key(alice, chat_key)
+            db.session.add(conn)
+            db.session.commit()
+        # admin sends a message
+        self.login_as('admin')
+        s = self.client.post(f'/chat/{alice.id}', data={'message': 'hi from admin'}, follow_redirects=True)
+        self.assertIn(s.status_code, (200, 302))
+        # alice should see it
+        self.login_as('alice')
+        r = self.client.get(f'/chat/{admin.id}')
+        self.assertIn(b'hi from admin', r.data)
+
+    def test_missing_keys_are_generated(self):
+        """A user record with no ed25519 fields should get keys when first used in chat."""
+        with app.app_context():
+            # create a new user without signing keys
+            rawx = generate_fernet_key()
+            u = User(username='charlie', password_hash=hash_password('cx'),
+                     dpass_hash=hash_password('dx'),
+                     keys_database_key=_APP_KEK.encrypt(rawx.encode('utf-8')).decode('utf-8'),
+                     approved=True)
+            db.session.add(u)
+            db.session.commit()
+            charlie = User.query.filter_by(username='charlie').first()
+            bob = User.query.filter_by(username='bob').first()
+            # create connection
+            conn = Connection(sender_id=charlie.id, receiver_id=bob.id, status='accepted')
+            chat_key = generate_fernet_key()
+            conn.chat_key_enc_sender = encrypt_with_user_key(charlie, chat_key)
+            conn.chat_key_enc_receiver = encrypt_with_user_key(bob, chat_key)
+            db.session.add(conn)
+            db.session.commit()
+        # charlie should not have keys initially
+        self.assertFalse(charlie.ed25519_priv_enc)
+        # now simulate charlie sending a message, which should trigger key gen
+        self.login_as('charlie')
+        resp = self.client.post(f'/chat/{bob.id}', data={'message': 'hello bob'}, follow_redirects=True)
+        self.assertIn(resp.status_code, (200, 302))
+        # re-fetch charlie from db to check keys were stored
+        with app.app_context():
+            charlie = User.query.filter_by(username='charlie').first()
+            self.assertTrue(charlie.ed25519_priv_enc and charlie.ed25519_pub_b64)
+        # bob should be able to read the message
+        self.login_as('bob')
+        r = self.client.get(f'/chat/{charlie.id}')
+        self.assertIn(b'hello bob', r.data)
+
     def test_chat_page_requires_connection(self):
         with app.app_context():
             alice = User.query.filter_by(username='alice').first()
@@ -244,6 +325,12 @@ class RouteTest(unittest.TestCase):
                 os.environ['SECRET_KEY'] = val
         first_key = os.environ.get('SECRET_KEY')
         self.assertIsNotNone(first_key)
+        # make sure the Flask app and KEK are in sync with the environment
+        appmod.app.secret_key = first_key
+        from app import _derive_app_kek, Fernet, _APP_KEK as _app_kek_ref
+        appmod._APP_KEK = Fernet(_derive_app_kek())
+        # keep our local reference in sync as well (imports are snapshots)
+        _APP_KEK = appmod._APP_KEK  # type: ignore
         # file may or may not exist depending on startup configuration; we don't require it
         # create a user and connection and store chat key
         with app.app_context():
@@ -365,16 +452,90 @@ class AdminTest(unittest.TestCase):
         # perform registration
         r2 = self.client.post('/admin/register', data={'username': 'boss', 'password': 'pass', 'dpassword': 'dpass', 'master_key': 'mkey'}, follow_redirects=True)
         self.assertIn(r2.status_code, (200, 302))
+        # registration should have created signing keys as well
+        with app.app_context():
+            a = User.query.filter_by(username='boss').first()
+            self.assertIsNotNone(a)
+            self.assertTrue(a.ed25519_pub_b64 and a.ed25519_priv_enc)
         # now login as admin
         r3 = self.client.post('/login', data={'username': 'boss', 'password': 'pass'}, follow_redirects=True)
         self.assertIn(r3.status_code, (200, 302))
+
+        # create a second normal user and establish a chat connection so the
+        # freshly-registered admin can send a message
+        with app.app_context():
+            rawj = generate_fernet_key()
+            # generate ed25519 keys for the new user
+            from cryptography.hazmat.primitives.asymmetric import ed25519 as _ed
+            privj = _ed.Ed25519PrivateKey.generate()
+            pubj = privj.public_key()
+            try:
+                privj_raw = privj.private_bytes_raw()
+                pubj_raw = pubj.public_bytes_raw()
+            except Exception:
+                from cryptography.hazmat.primitives import serialization
+                privj_raw = privj.private_bytes(
+                    encoding=serialization.Encoding.Raw,
+                    format=serialization.PrivateFormat.Raw,
+                    encryption_algorithm=serialization.NoEncryption(),
+                )
+                pubj_raw = pubj.public_bytes(
+                    encoding=serialization.Encoding.Raw,
+                    format=serialization.PublicFormat.Raw,
+                )
+            ed_privj_enc = Fernet(rawj.encode('utf-8')).encrypt(privj_raw).decode('utf-8')
+            ed_pubj_b64 = base64.urlsafe_b64encode(pubj_raw).decode('utf-8')
+            jim = User(username='jim', password_hash=hash_password('jj'),
+                       dpass_hash=hash_password('dd'),
+                       keys_database_key=_APP_KEK.encrypt(rawj.encode('utf-8')).decode('utf-8'),
+                       ed25519_pub_b64=ed_pubj_b64,
+                       ed25519_priv_enc=ed_privj_enc,
+                       approved=True)
+            db.session.add(jim)
+            db.session.commit()
+            # add connection and chat key
+            boss = User.query.filter_by(username='boss').first()
+            conn = Connection(sender_id=boss.id, receiver_id=jim.id, status='accepted')
+            ck = generate_fernet_key()
+            conn.chat_key_enc_sender = encrypt_with_user_key(boss, ck)
+            conn.chat_key_enc_receiver = encrypt_with_user_key(jim, ck)
+            db.session.add(conn)
+            db.session.commit()
+        # boss should be able to send a message
+        self.login_as('boss')
+        rmsg = self.client.post(f'/chat/{jim.id}', data={'message': 'hi jim'}, follow_redirects=True)
+        self.assertIn(rmsg.status_code, (200, 302))
+        # verify jim can read it
+        self.login_as('jim')
+        rview = self.client.get(f'/chat/{boss.id}')
+        self.assertIn(b'hi jim', rview.data)
 
     def test_manage_users_page(self):
         # create an admin and a normal user
         with app.app_context():
             rawa = generate_fernet_key()
             rawu = generate_fernet_key()
-            a = User(username='boss', password_hash=hash_password('p'), dpass_hash=hash_password('d'), keys_database_key=_APP_KEK.encrypt(rawa.encode('utf-8')).decode('utf-8'), is_admin=True, approved=True, master_key_hash=hash_password('m'))
+            # create signing keys for the admin so they behave like normal users
+            from cryptography.hazmat.primitives.asymmetric import ed25519 as _ed
+            privA = _ed.Ed25519PrivateKey.generate()
+            pubA = privA.public_key()
+            try:
+                privA_raw = privA.private_bytes_raw()
+                pubA_raw = pubA.public_bytes_raw()
+            except Exception:
+                from cryptography.hazmat.primitives import serialization
+                privA_raw = privA.private_bytes(
+                    encoding=serialization.Encoding.Raw,
+                    format=serialization.PrivateFormat.Raw,
+                    encryption_algorithm=serialization.NoEncryption(),
+                )
+                pubA_raw = pubA.public_bytes(
+                    encoding=serialization.Encoding.Raw,
+                    format=serialization.PublicFormat.Raw,
+                )
+            ed_privA_enc = Fernet(rawa.encode('utf-8')).encrypt(privA_raw).decode('utf-8')
+            ed_pubA_b64 = base64.urlsafe_b64encode(pubA_raw).decode('utf-8')
+            a = User(username='boss', password_hash=hash_password('p'), dpass_hash=hash_password('d'), keys_database_key=_APP_KEK.encrypt(rawa.encode('utf-8')).decode('utf-8'), is_admin=True, approved=True, master_key_hash=hash_password('m'), ed25519_pub_b64=ed_pubA_b64, ed25519_priv_enc=ed_privA_enc)
             u = User(username='joe', password_hash=hash_password('x'), dpass_hash=hash_password('y'), keys_database_key=_APP_KEK.encrypt(rawu.encode('utf-8')).decode('utf-8'))
             db.session.add_all([a, u])
             db.session.commit()

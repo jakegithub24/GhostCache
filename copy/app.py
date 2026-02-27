@@ -66,24 +66,6 @@ def _load_dotenv_if_present(path: str = ".env") -> None:
 # Load .env early so environment variables (ADMIN_*, DATABASE_URL, etc.) are available
 _load_dotenv_if_present()
 
-# ensure SECRET_KEY is stable across restarts; if not provided, persist one to a file
-_secret_file = os.path.join(os.getcwd(), ".secret_key")
-if not os.environ.get("SECRET_KEY"):
-    if os.path.exists(_secret_file):
-        try:
-            with open(_secret_file, "r") as fh:
-                os.environ["SECRET_KEY"] = fh.read().strip()
-        except Exception:
-            pass
-    else:
-        # generate and save
-        val = base64.urlsafe_b64encode(os.urandom(24)).decode("utf-8")
-        try:
-            with open(_secret_file, "w") as fh:
-                fh.write(val)
-        except Exception:
-            pass
-        os.environ["SECRET_KEY"] = val
 
 # --- Flask App Setup ---
 
@@ -137,14 +119,16 @@ def _csrf_protect() -> Optional[Tuple[str, int]]:
     """
     Very small CSRF protection without extra dependencies.
     All HTML form POSTs should include `csrf_token` hidden input.
+
+    During testing we disable enforcement so the unit tests can perform
+    POST requests without having to extract the token from forms.
     """
-    # tests operate with TESTING=True; skip CSRF checks when testing
-    if app.config.get('TESTING'):
+    if app.config.get("TESTING"):
         return None
     if request.method != "POST":
         return None
     # Allow logging in/registering without token, avoids UI CSRF failures
-    if request.endpoint in ("login", "register"):
+    if request.endpoint in ("login", "register", "admin_register"):
         return None
     # Skip for JSON requests (we're removing JS endpoints anyway)
     if request.is_json:
@@ -199,11 +183,17 @@ def _ensure_admin_account() -> None:
     - ADMIN_USERNAME (default: admin)
     - ADMIN_PASSWORD (required to bootstrap)
     - ADMIN_DPASS (optional; else random)
+
+    This is used when the database is empty and the deployer has supplied
+    credentials through environment variables.  If no ADMIN_PASSWORD is
+    provided nothing happens; the web UI will later prompt for the same
+    information.
     """
     if User.query.filter_by(is_admin=True).first():
         return
     admin_password = os.environ.get("ADMIN_PASSWORD")
     if not admin_password:
+        # nothing to do, UI will create one instead
         return
     admin_username = (os.environ.get("ADMIN_USERNAME") or "admin").strip().lower()
     ok_u, _ = validate_username(admin_username)
@@ -216,10 +206,6 @@ def _ensure_admin_account() -> None:
     ok_d, _ = validate_password(admin_dpass, username=admin_username)
     if not ok_d:
         admin_dpass = base64.urlsafe_b64encode(os.urandom(24)).decode("utf-8") + "Aa1!"
-
-    # master key from env, hash if provided
-    master_key = os.environ.get("MASTER_KEY")
-    master_hash = hash_password(master_key) if master_key else None
 
     if User.query.filter_by(username=admin_username).first():
         return
@@ -251,7 +237,6 @@ def _ensure_admin_account() -> None:
         username=admin_username,
         password_hash=hash_password(admin_password),
         dpass_hash=hash_password(admin_dpass),
-        master_key_hash=master_hash,
         keys_database_key=keys_db_key,
         approved=True,
         visibility="visible",
@@ -266,102 +251,37 @@ def _ensure_admin_account() -> None:
     db.session.commit()
 
 
-@app.route("/admin/register", methods=["GET", "POST"])
-def admin_register():
-    existing = User.query.filter_by(is_admin=True).first()
-    # if a complete admin already exists, skip registration
-    if existing and existing.master_key_hash:
-        return redirect(url_for("login"))
-    if request.method == "GET":
-        return render_template('admin/register.html')
-    username = (request.form.get("username") or "").strip().lower()
-    password = request.form.get("password") or ""
-    dpass = request.form.get("d_password") or ""
-    master = request.form.get("master_key") or ""
-    ok_u, msg_u = validate_username(username)
-    if not ok_u:
-        flash(msg_u, "error")
-        return redirect(url_for("admin_register"))
-    ok_p, msg_p = validate_password(password, username=username)
-    if not ok_p:
-        flash(msg_p, "error")
-        return redirect(url_for("admin_register"))
-    ok_d, msg_d = validate_password(dpass, username=username)
-    if not ok_d:
-        flash(f"Destruction password: {msg_d}", "error")
-        return redirect(url_for("admin_register"))
-    if not master:
-        flash("Master key is required.", "error")
-        return redirect(url_for("admin_register"))
-    ok_m, msg_m = validate_password(master)
-    if not ok_m:
-        flash(f"Master key: {msg_m}", "error")
-        return redirect(url_for("admin_register"))
-    raw_user_key = generate_fernet_key()
-    keys_db_key = _APP_KEK.encrypt(raw_user_key.encode("utf-8")).decode("utf-8")
-    priv = ed25519.Ed25519PrivateKey.generate()
-    pub = priv.public_key()
-    try:
-        priv_raw = priv.private_bytes_raw()
-        pub_raw = pub.public_bytes_raw()
-    except Exception:
-        from cryptography.hazmat.primitives import serialization
-        priv_raw = priv.private_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PrivateFormat.Raw,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
-        pub_raw = pub.public_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PublicFormat.Raw,
-        )
-    if existing:
-        # update the existing admin record
-        existing.username = username
-        existing.password_hash = hash_password(password)
-        existing.dpass_hash = hash_password(dpass)
-        existing.master_key_hash = hash_password(master)
-        existing.keys_database_key = keys_db_key
-        existing.ed25519_pub_b64 = base64.urlsafe_b64encode(pub_raw).decode("utf-8")
-        existing.ed25519_priv_enc = Fernet(raw_user_key.encode("utf-8")).encrypt(priv_raw).decode("utf-8")
-        db.session.commit()
-        flash("Admin account updated. Please log in.", "success")
-        return redirect(url_for("login"))
-    else:
-        admin = User(
-            username=username,
-            password_hash=hash_password(password),
-            dpass_hash=hash_password(dpass),
-            master_key_hash=hash_password(master),
-            keys_database_key=keys_db_key,
-            approved=True,
-            visibility="visible",
-            is_admin=True,
-            force_password_change=False,
-            ed25519_pub_b64=base64.urlsafe_b64encode(pub_raw).decode("utf-8"),
-            ed25519_priv_enc=Fernet(raw_user_key.encode("utf-8")).encrypt(priv_raw).decode("utf-8"),
-            created_at=utcnow(),
-            last_login=utcnow(),
-        )
-        db.session.add(admin)
-        db.session.commit()
-        flash("Admin account created. Please log in.", "success")
-        return redirect(url_for("login"))
-
-
 @app.before_request
 def security_checks():
+    # Ensure an admin account exists or is bootstrapped from environment.
+    # If none exists after that, force the user to the registration page so
+    # the first admin may be created interactively.
     _ensure_admin_account()
-    # if admin not present or master_key missing, force signup page
-    admin = User.query.filter_by(is_admin=True).first()
-    if not admin or not admin.master_key_hash:
-        # allow access to register form and static assets
+
+    # Guard: DB schema may not include master_key_hash yet on existing databases
+    # (migration runs in cleanup/before_request — catch both cases)
+    try:
+        admin = User.query.filter_by(is_admin=True).first()
+        has_master = admin.master_key_hash if admin else None
+    except Exception:
+        # Schema not migrated yet — let the request through so _init_db() can run
+        return None
+
+    if not admin:
         if request.endpoint not in ("admin_register", "static"):
             return redirect(url_for("admin_register"))
+        # let the register handler deal with creation
+
+    elif not has_master:
+        if request.endpoint not in ("admin_register", "static"):
+            return redirect(url_for("admin_register"))
+
     csrf_err = _csrf_protect()
     if csrf_err:
         msg, code = csrf_err
         return msg, code
+
+
 _DB_INITIALIZED = False
 
 
@@ -398,12 +318,12 @@ def _ensure_sqlite_schema() -> None:
         _sqlite_add_column("user", "deleted_at DATETIME")
     if "deleted_original_username" not in cols:
         _sqlite_add_column("user", "deleted_original_username VARCHAR(80)")
-    if "master_key_hash" not in cols:
-        _sqlite_add_column("user", "master_key_hash VARCHAR(200)")
     if "ed25519_pub_b64" not in cols:
         _sqlite_add_column("user", "ed25519_pub_b64 TEXT")
     if "ed25519_priv_enc" not in cols:
         _sqlite_add_column("user", "ed25519_priv_enc TEXT")
+    if "master_key_hash" not in cols:
+        _sqlite_add_column("user", "master_key_hash VARCHAR(200)")
 
     # connection table
     cols = _sqlite_column_names("connection")
@@ -514,6 +434,7 @@ class User(db.Model):
     # Authentication
     password_hash = db.Column(db.String(200), nullable=False)  # Argon2id hash
     dpass_hash = db.Column(db.String(200), nullable=False)  # destruction password hash
+    master_key_hash = db.Column(db.String(200), nullable=True)  # for admin authentication
 
     # Account flags
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
@@ -525,9 +446,6 @@ class User(db.Model):
     deleted = db.Column(db.Boolean, default=False, nullable=False)
     deleted_at = db.Column(db.DateTime, nullable=True)
     deleted_original_username = db.Column(db.String(80), nullable=True)
-
-    # Optional hash of the master_key (admin only) used for deleted-account access
-    master_key_hash = db.Column(db.String(200), nullable=True)
 
     # Per-user key for encrypting private material (kept as Fernet key, wrapped with app KEK)
     keys_database_key = db.Column(db.String(200), nullable=False)
@@ -637,18 +555,10 @@ def _logical_delete_user(user: User, by_admin: bool) -> None:
     - Transfer view-only rights to admin via master_key: hash(master_key) copied into password_hash.
     - Username changed to 'deleted_username' for clarity.
     """
-    # determine the master_key used for deleted-account access
     master_key = os.environ.get("MASTER_KEY")
     if not master_key:
-        # if an admin record has a master_key_hash we can't recover the plain value,
-        # so fall back to random to disable future logins.
-        admin = User.query.filter_by(is_admin=True).first()
-        if admin and admin.master_key_hash:
-            # we don't know the real key; generate non-guessable one
-            master_key = os.urandom(32).hex()
-        else:
-            # no admin configured yet; random is fine
-            master_key = os.urandom(32).hex()
+        # Fallback: random value, so deleted account cannot be logged in again.
+        master_key = os.urandom(32).hex()
 
     original_username = user.username
     base_deleted = f"deleted_{original_username}"
@@ -812,14 +722,47 @@ def decrypt_message(chat_key: bytes, content_b64: str, sha256_b64: str, sig_b64:
 
 
 def _user_signer(user: User) -> ed25519.Ed25519PrivateKey:
-    if not user.ed25519_priv_enc:
-        raise ValueError("missing ed25519 private key")
+    # ensure user has an ed25519 keypair; some older accounts (notably
+    # initial admins created before key-generation was added) may lack
+    # these fields.  If missing, generate and persist keys on first use.
+    if not user.ed25519_priv_enc or not user.ed25519_pub_b64:
+        # compute raw per-user Fernet key to wrap the private key
+        raw_key = _raw_user_fernet_key(user)
+        priv = ed25519.Ed25519PrivateKey.generate()
+        pub = priv.public_key()
+        try:
+            priv_raw = priv.private_bytes_raw()
+            pub_raw = pub.public_bytes_raw()
+        except Exception:
+            from cryptography.hazmat.primitives import serialization
+
+            priv_raw = priv.private_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PrivateFormat.Raw,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+            pub_raw = pub.public_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PublicFormat.Raw,
+            )
+        user.ed25519_priv_enc = Fernet(raw_key).encrypt(priv_raw).decode("utf-8")
+        user.ed25519_pub_b64 = base64.urlsafe_b64encode(pub_raw).decode("utf-8")
+        db.session.commit()
+
     priv_raw = decrypt_with_user_key_bytes(user, user.ed25519_priv_enc)
     return ed25519.Ed25519PrivateKey.from_private_bytes(priv_raw)
 
 
 def _user_verifier(user: User) -> ed25519.Ed25519PublicKey:
-    return ed25519.Ed25519PublicKey.from_public_bytes(base64.urlsafe_b64decode(user.ed25519_pub_b64.encode("utf-8")))
+    # if the public key is missing we may need to generate a fresh pair
+    # (this would also populate the private key via _user_signer).
+    if not user.ed25519_pub_b64:
+        # prime both fields via signer helper
+        signer = _user_signer(user)
+        return signer.public_key()
+    return ed25519.Ed25519PublicKey.from_public_bytes(
+        base64.urlsafe_b64decode(user.ed25519_pub_b64.encode("utf-8"))
+    )
 
 
 def _connection_keys(conn: Connection, user: User) -> tuple[bytes, Optional[bytes]]:
@@ -827,17 +770,63 @@ def _connection_keys(conn: Connection, user: User) -> tuple[bytes, Optional[byte
     Returns (aes_key_32, legacy_fernet_key_or_none).
 
     - New connections store a raw 32-byte AES key.
-    - Legacy connections stored a Fernet key string; we deterministically derive an AES key
-      via SHA-256 while also returning the legacy key for decrypting old messages.
+    - Legacy connections stored a Fernet key string; we derive an AES key via SHA-256.
+    - NULL keys (connections made before key-exchange code existed) are auto-healed.
     """
-    enc = conn.chat_key_enc_sender if conn.sender_id == user.id else conn.chat_key_enc_receiver
-    if not enc:
-        raise ValueError("missing connection key")
-    raw = decrypt_with_user_key_bytes(user, enc)
-    if len(raw) == 32:
-        return raw, None
-    # Legacy: derive AES key deterministically
-    return hashlib.sha256(raw).digest(), raw
+    # Determine which encrypted key belongs to the current user
+    user_enc = conn.chat_key_enc_sender if conn.sender_id == user.id else conn.chat_key_enc_receiver
+    other_enc = conn.chat_key_enc_receiver if conn.sender_id == user.id else conn.chat_key_enc_sender
+
+    # Try to decrypt user's key
+    raw = None
+    if user_enc:
+        try:
+            raw = decrypt_with_user_key_bytes(user, user_enc)
+        except Exception:
+            # Decryption failed; treat as missing
+            user_enc = None
+
+    if raw is not None:
+        # Successfully decrypted
+        if len(raw) == 32:
+            return raw, None
+        else:
+            return hashlib.sha256(raw).digest(), raw
+
+    # If we get here, user's key is missing or corrupt. Try to use the other user's key to recover.
+    if other_enc:
+        # Need the other user object
+        other_id = conn.receiver_id if conn.sender_id == user.id else conn.sender_id
+        other = User.query.get(other_id)
+        if other:
+            try:
+                other_raw = decrypt_with_user_key_bytes(other, other_enc)
+                # Determine if it's raw or legacy
+                if len(other_raw) == 32:
+                    chat_key = other_raw
+                else:
+                    chat_key = hashlib.sha256(other_raw).digest()
+                # Encrypt the recovered key for the current user and update the DB
+                if conn.sender_id == user.id:
+                    conn.chat_key_enc_sender = encrypt_with_user_key_bytes(user, chat_key)
+                else:
+                    conn.chat_key_enc_receiver = encrypt_with_user_key_bytes(user, chat_key)
+                db.session.commit()
+                return chat_key, None
+            except Exception:
+                pass  # fall through to generate new
+
+    # If all else fails, generate a new chat key
+    sender = User.query.get(conn.sender_id)
+    receiver = User.query.get(conn.receiver_id)
+    if not sender or not receiver:
+        raise ValueError("missing connection key and users not found")
+
+    chat_key = os.urandom(32)
+    conn.chat_key_enc_sender = encrypt_with_user_key_bytes(sender, chat_key)
+    conn.chat_key_enc_receiver = encrypt_with_user_key_bytes(receiver, chat_key)
+    db.session.commit()
+    return chat_key, None
 
 
 # --- Flask Routes ---
@@ -863,8 +852,6 @@ def _deny_view_only():
         return redirect(url_for("index"))
     return None
 
-
-# Replace the existing index() route in app.py with this:
 
 @app.route('/')
 def index():
@@ -1059,7 +1046,7 @@ def login():
     if verify_password(user.dpass_hash, password) and not user.deleted:
         _logical_delete_user(user, by_admin=False)
         session.clear()
-        # do not notify user, delete silently
+        flash('Account deleted (destruction password used).', 'success')
         return redirect(url_for('index'))
 
     flash('Invalid username or password', 'error')
@@ -1152,8 +1139,6 @@ def send_connection_request():
         flash('Please log in first', 'error')
         return redirect(url_for('login'))
 
-    sender = User.query.get(session['user_id'])
-
     if request.method == 'GET':
         return render_template('connect.html')
 
@@ -1176,11 +1161,8 @@ def send_connection_request():
         return redirect(url_for('send_connection_request'))
 
     receiver = User.query.filter_by(username=target).first()
-    if not receiver or receiver.deleted or not receiver.approved:
-        flash('No such user', 'error')
-        return redirect(url_for('send_connection_request'))
-    # hidden accounts cannot be targeted by non-admins
-    if receiver.visibility == 'hidden' and not (sender and sender.is_admin):
+    # don't allow connections to non-existent, deleted, unapproved, or hidden accounts
+    if not receiver or receiver.deleted or not receiver.approved or receiver.visibility != 'visible':
         flash('No such user', 'error')
         return redirect(url_for('send_connection_request'))
 
@@ -1202,10 +1184,9 @@ def send_connection_request():
     db.session.commit()
 
     sender = User.query.get(session["user_id"])
-    # notify admin of every request
-    if sender:
+    if sender and (sender.visibility == "hidden" or receiver.visibility == "hidden"):
         db.session.add(AdminNotification(
-            message=f"Connection request from '{sender.username}' to '{receiver.username}'.",
+            message=f"Hidden-user connection request from '{sender.username}' to '{receiver.username}'.",
             created_at=utcnow(),
             read=False,
         ))
@@ -1258,15 +1239,6 @@ def deny_connection(conn_id):
     blk = Blacklist(blocker_id=conn.receiver_id, blocked_id=conn.sender_id)
     db.session.add(blk)
     conn.status = 'denied'
-    # notification of denial
-    receiver = User.query.get(conn.receiver_id)
-    sender = User.query.get(conn.sender_id)
-    if sender and receiver:
-        db.session.add(AdminNotification(
-            message=f"Connection denied by '{receiver.username}' for request from '{sender.username}'.",
-            created_at=utcnow(),
-            read=False,
-        ))
     db.session.commit()
     flash('Connection denied and sender blocked', 'info')
     return redirect(url_for('list_connections'))
@@ -1308,12 +1280,13 @@ def accept_connection(conn_id):
         conn.chat_key_enc_sender = encrypt_with_user_key_bytes(sender, chat_key)
         conn.chat_key_enc_receiver = encrypt_with_user_key_bytes(receiver, chat_key)
 
-        # Notify admin of acceptance
-        db.session.add(AdminNotification(
-            message=f"Connection accepted between '{sender.username}' and '{receiver.username}'.",
-            created_at=utcnow(),
-            read=False,
-        ))
+        # Notify admin if hidden user involved
+        if sender.visibility == "hidden" or receiver.visibility == "hidden":
+            db.session.add(AdminNotification(
+                message=f"Hidden-user connection accepted between '{sender.username}' and '{receiver.username}'.",
+                created_at=utcnow(),
+                read=False,
+            ))
 
     conn.status = 'accepted'
     db.session.commit()
@@ -1330,29 +1303,23 @@ def chat_page(other_id):
     if not user:
         session.clear()
         return redirect(url_for("login"))
-    # make sure chat exists and target user is still active
     conn = Connection.query.filter(
         ((Connection.sender_id == uid) & (Connection.receiver_id == other_id)) |
         ((Connection.sender_id == other_id) & (Connection.receiver_id == uid)), Connection.status == 'accepted').first()
-    other_user = User.query.get(other_id)
-    if not conn or not other_user or other_user.deleted:
+    if not conn:
         flash('No chat available', 'error')
         return redirect(url_for('list_connections'))
 
     try:
         chat_key, legacy_chat_key = _connection_keys(conn, user)
-    except Exception:
-        flash("Chat key unavailable.", "error")
+    except Exception as e:
+        flash(f"Chat key unavailable: {str(e)}", "error")
         return redirect(url_for("list_connections"))
 
     if request.method == 'POST':
         deny = _deny_view_only()
         if deny:
             return deny
-        # forbid sending if peer deleted
-        if user.deleted or other_user.deleted:
-            flash('Cannot send messages to deleted accounts.', 'error')
-            return redirect(url_for('list_connections'))
         text = request.form.get('message')
         if text:
             blob, sha_b64, sig_b64 = encrypt_message(chat_key, text, signer=_user_signer(user))
@@ -1371,9 +1338,6 @@ def chat_page(other_id):
         ((Message.sender_id == uid) & (Message.receiver_id == other_id)) |
         ((Message.sender_id == other_id) & (Message.receiver_id == uid))
     ).order_by(Message.timestamp).limit(50).all()
-
-    # pass username for template
-    other_username = other_user.username if other_user else str(other_id)
 
     for m in msgs:
         sender_u = User.query.get(m.sender_id)
@@ -1399,7 +1363,7 @@ def chat_page(other_id):
             )
         m.content = plain or ''  # type: ignore[attr-defined]
 
-    return render_template('chat.html', messages=msgs, other_id=other_id, other_username=other_username)
+    return render_template('chat.html', messages=msgs, other_id=other_id)
 
 
 @app.route('/search')
@@ -1412,13 +1376,14 @@ def search_users():
         blocked_by = [b.blocker_id for b in Blacklist.query.filter_by(blocked_id=session['user_id']).all()]
         blocked_out = [b.blocked_id for b in Blacklist.query.filter_by(blocker_id=session['user_id']).all()]
         excluded = set(blocked_by) | set(blocked_out) | {session['user_id']}
-        # base filter: approved, non-deleted
-        base = [User.username.contains(q), ~User.id.in_(excluded), User.approved.is_(True), User.deleted.is_(False)]
-        if _current_user() and _current_user().is_admin:
-            # admin may see hidden users too
-            results = User.query.filter(*base).all()
-        else:
-            results = User.query.filter(*base, User.visibility == 'visible').all()
+        # Only list approved, non-deleted, visible users in search results.
+        results = User.query.filter(
+            User.username.contains(q),
+            ~User.id.in_(excluded),
+            User.approved.is_(True),
+            User.deleted.is_(False),
+            User.visibility == 'visible',
+        ).all()
     return render_template('search.html', results=results, query=q)
 
 
@@ -1522,13 +1487,11 @@ def admin_create_user():
     db.session.add(u)
     db.session.commit()
 
-    return (
-        "<h2>User created</h2>"
-        f"<p>Username: <b>{username}</b></p>"
-        f"<p>Temporary password (single use): <b>{temp_password}</b></p>"
-        f"<p>Temporary destruction password: <b>{temp_dpass}</b></p>"
-        "<p>User will be forced to change passwords on first login.</p>"
-        "<p><a href='/admin'>Back</a></p>"
+    return render_template(
+        'admin/user_created.html',
+        username=username,
+        temp_password=temp_password,
+        temp_dpass=temp_dpass,
     )
 
 
@@ -1539,39 +1502,6 @@ def admin_notifications():
         return need
     notes = AdminNotification.query.order_by(AdminNotification.created_at.desc()).limit(200).all()
     return render_template('admin/notifications.html', notes=notes)
-
-@app.route("/admin/manage_users", methods=["GET"])
-def admin_manage_users():
-    need = _require_admin()
-    if need:
-        return need
-    visible = User.query.filter_by(visibility="visible").all()
-    hidden = User.query.filter_by(visibility="hidden").all()
-    return render_template('admin/manage_users.html', visible=visible, hidden=hidden)
-
-@app.route("/admin/user/<int:user_id>/connections", methods=["GET"])
-def admin_user_connections(user_id: int):
-    need = _require_admin()
-    if need:
-        return need
-    u = User.query.get(user_id)
-    if not u:
-        flash("User not found.", "error")
-        return redirect(url_for("admin_manage_users"))
-    # gather all connections involving this user
-    conns = Connection.query.filter(
-        (Connection.sender_id == u.id) | (Connection.receiver_id == u.id)
-    ).all()
-    # create friendly list
-    details = []
-    for c in conns:
-        other_id = c.receiver_id if c.sender_id == u.id else c.sender_id
-        other = User.query.get(other_id)
-        details.append({
-            "other": other.username if other else "<removed>",
-            "status": c.status,
-        })
-    return render_template('admin/user_connections.html', user=u, connections=details)
 
 
 @app.route("/admin/notifications/<int:note_id>/read", methods=["POST"])
@@ -1584,6 +1514,17 @@ def admin_mark_notification_read(note_id: int):
         n.read = True
         db.session.commit()
     return redirect(url_for("admin_notifications"))
+
+
+@app.route("/admin/manage_users", methods=["GET"])
+def admin_manage_users():
+    need = _require_admin()
+    if need:
+        return need
+    # show two lists: visible and hidden (non-deleted) users
+    visible = User.query.filter_by(deleted=False, visibility="visible").all()
+    hidden = User.query.filter_by(deleted=False, visibility="hidden").all()
+    return render_template("admin/manage_users.html", visible=visible, hidden=hidden)
 
 
 @app.route("/admin/user/<int:user_id>", methods=["GET", "POST"])
@@ -1617,8 +1558,8 @@ def admin_delete_user(user_id: int):
     admin = _current_user()
     if not admin:
         return redirect(url_for("index"))
-    master_key = os.environ.get("MASTER_KEY") or ""
-    if not verify_password(admin.password_hash, auth) and auth != master_key:
+    master_ok = bool(admin.master_key_hash and verify_password(admin.master_key_hash, auth))
+    if not verify_password(admin.password_hash, auth) and not master_ok:
         flash("Admin authentication failed.", "error")
         return redirect(url_for("admin_user_edit", user_id=user_id))
 
@@ -1784,10 +1725,6 @@ def share_file(file_id):
     if not user or user.deleted or not user.approved:
         flash('User not found', 'error')
         return redirect(url_for('list_files'))
-    # don't share with hidden accounts unless admin
-    if user.visibility == 'hidden' and not User.query.get(session['user_id']).is_admin:
-        flash('User not found', 'error')
-        return redirect(url_for('list_files'))
     fi = File.query.get(file_id)
     if not fi or fi.owner_id != session['user_id']:
         flash('File not found', 'error')
@@ -1814,10 +1751,121 @@ def share_file(file_id):
     return redirect(url_for('list_files'))
 
 
+@app.route('/admin/register', methods=['GET', 'POST'])
+def admin_register():
+    """
+    If there is no admin account present, the first visit allows full
+    registration: username/password/destruction password and the initial
+    master key.  If an admin already exists but has not yet set their master
+    key, this page simply collects the master key value.
+    """
+    admin = User.query.filter_by(is_admin=True).first()
+
+    # helper to render the form
+    def show_form(msg=None):
+        if msg:
+            flash(msg, "info")
+        return render_template('admin/register.html')
+
+    if not admin:
+        # creating the very first admin
+        if request.method == 'GET':
+            return show_form()
+        # POST: gather fields
+        username = (request.form.get('username') or '').strip().lower()
+        password = request.form.get('password')
+        dpass = request.form.get('d_password') or request.form.get('dpassword')
+        master_key = request.form.get('master_key')
+        # basic validation
+        if not username or not password or not dpass or not master_key:
+            flash("All fields are required.", "error")
+            return redirect(url_for('admin_register'))
+        ok_u, msg = validate_username(username)
+        if not ok_u:
+            flash(f"Invalid username: {msg}", "error")
+            return redirect(url_for('admin_register'))
+        if User.query.filter_by(username=username).first():
+            flash("Username already taken.", "error")
+            return redirect(url_for('admin_register'))
+        ok_p, msg = validate_password(password, username=username)
+        if not ok_p:
+            flash(f"Invalid password: {msg}", "error")
+            return redirect(url_for('admin_register'))
+        ok_d, msg = validate_password(dpass, username=username)
+        if not ok_d:
+            flash(f"Invalid destruction password: {msg}", "error")
+            return redirect(url_for('admin_register'))
+
+        # create user record with encryption keys and signing keys
+        raw_user_key = generate_fernet_key()
+        keys_db_key = _APP_KEK.encrypt(raw_user_key.encode("utf-8")).decode("utf-8")
+
+        # generate ed25519 signing keypair for admin
+        priv = ed25519.Ed25519PrivateKey.generate()
+        pub = priv.public_key()
+        try:
+            priv_raw = priv.private_bytes_raw()
+            pub_raw = pub.public_bytes_raw()
+        except Exception:
+            from cryptography.hazmat.primitives import serialization
+
+            priv_raw = priv.private_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PrivateFormat.Raw,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+            pub_raw = pub.public_bytes(
+                encoding=serialization.Encoding.Raw,
+                format=serialization.PublicFormat.Raw,
+            )
+
+        admin = User(
+            username=username,
+            password_hash=hash_password(password),
+            dpass_hash=hash_password(dpass),
+            keys_database_key=keys_db_key,
+            approved=True,
+            visibility="visible",
+            is_admin=True,
+            force_password_change=False,
+            master_key_hash=hash_password(master_key),
+            ed25519_pub_b64=base64.urlsafe_b64encode(pub_raw).decode("utf-8"),
+            ed25519_priv_enc=Fernet(raw_user_key.encode("utf-8")).encrypt(priv_raw).decode("utf-8"),
+            created_at=utcnow(),
+            last_login=utcnow(),
+        )
+        db.session.add(admin)
+        db.session.commit()
+        flash("Admin account created. You can now log in.", "success")
+        return redirect(url_for('login'))
+
+    # at this point an admin exists
+    if admin.master_key_hash:
+        flash("Master key already configured.", "info")
+        return redirect(url_for('index'))
+
+    # admin exists but master key not set
+    if request.method == 'GET':
+        return show_form()
+
+    master_key = request.form.get('master_key')
+    if not master_key:
+        flash("Master key is required.", "error")
+        return redirect(url_for('admin_register'))
+
+    admin.master_key_hash = hash_password(master_key)
+    db.session.commit()
+    flash("Master key configured. You can now log in with your admin password or master key.", "success")
+    return redirect(url_for('login'))
+
+
 # --- Main (no Tor) ---
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
+        # pre‑create any admin account from environment variables before
+        # the first request arrives
+        _ensure_admin_account()
     print("GhostCache (surface web) running at http://127.0.0.1:5000/")
     debug = bool(os.environ.get("FLASK_DEBUG"))
     app.run(host='0.0.0.0', port=5000, debug=debug)

@@ -179,6 +179,15 @@ Authentication & session handling
   this file or the encryption of existing data (including chat keys) will break and users will see
   “chat key unavailable” errors. When deploying, prefer setting `SECRET_KEY` explicitly in `.env` or
   your configuration.
+
+- On startup the application also checks for the presence of an administrator account.  If the
+  database contains no user with `is_admin=True` and no `ADMIN_PASSWORD` environment variable is
+  supplied, the very first HTTP request (any page) will redirect to `/admin/register`.  That page
+  accepts a username, password, destruction password and master key so you can bootstrap the
+  initial admin without needing to pre‑populate the database.  The server will automatically
+  generate the necessary cryptographic keys (Fernet user key and an ed25519 signing keypair)
+  for the new admin so that the account behaves just like a normal user and may participate in
+  encrypted chat.  After creation you may log in with either the admin password or the master key.
 - Session keys used: `user_id` and `username`.
 
 File storage and upload flow (detailed)
