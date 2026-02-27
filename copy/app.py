@@ -846,12 +846,54 @@ def _deny_view_only():
     return None
 
 
+# Replace the existing index() route in app.py with this:
+
 @app.route('/')
 def index():
     user = None
+    active_connections = []
+    pending_connections = []
+    recent_files = []
+
     if 'user_id' in session:
         user = User.query.get(session['user_id'])
-    return render_template('index.html', user=user)
+
+    if user and not session.get('view_only'):
+        uid = user.id
+
+        # Accepted connections with the other user object
+        accepted = Connection.query.filter(
+            ((Connection.sender_id == uid) | (Connection.receiver_id == uid)),
+            Connection.status == 'accepted'
+        ).order_by(Connection.created_at.desc()).all()
+
+        for conn in accepted:
+            other_id = conn.receiver_id if conn.sender_id == uid else conn.sender_id
+            other = User.query.get(other_id)
+            if other and not other.deleted:
+                active_connections.append({'conn': conn, 'other': other})
+
+        # Pending incoming requests
+        pending = Connection.query.filter_by(
+            receiver_id=uid, status='pending'
+        ).order_by(Connection.created_at.desc()).all()
+
+        for conn in pending:
+            other = User.query.get(conn.sender_id)
+            if other and not other.deleted:
+                pending_connections.append({'conn': conn, 'other': other})
+
+        # 3 most recent owned files
+        recent_files = File.query.filter_by(owner_id=uid)\
+            .order_by(File.created_at.desc()).limit(3).all()
+
+    return render_template(
+        'index.html',
+        user=user,
+        active_connections=active_connections,
+        pending_connections=pending_connections,
+        recent_files=recent_files,
+    )
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -980,11 +1022,7 @@ def login():
             # Allow user to authenticate and see a temporary informational page
             session.clear()
             session['pending_user'] = user.username
-            return (
-                "<h2>Admin approval pending</h2>"
-                "<p>Admin approval is pending, check after some time</p>"
-                "<p><a href='" + url_for('logout') + "'>Logout</a></p>"
-            )
+            return render_template('pending_approval.html', username=user.username)
 
         # Normal approved user login
         session.clear()
@@ -1022,31 +1060,22 @@ def password_change():
     need = _require_login()
     if need:
         return need
-    if request.method == "GET":
-        # Minimal form returned directly to avoid adding templates.
-        return (
-            "<h2>Change password</h2>"
-            "<form method='post'>"
-            "<input type='hidden' name='csrf_token' value='" + _get_session_csrf_token() + "'>"
-            "<label>Current password</label><input type='password' name='old_password' required><br>"
-            "<label>New password</label><input type='password' name='password' required><br>"
-            "<label>New destruction password</label><input type='password' name='d_pass' required><br>"
-            "<button type='submit'>Update</button>"
-            "</form>"
-        )
-
-    deny = _deny_view_only()
-    if deny:
-        return deny
 
     user = _current_user()
     if not user:
         session.clear()
         return redirect(url_for("login"))
 
+    if request.method == "GET":
+        return render_template('password_change.html', force=user.force_password_change)
+
+    deny = _deny_view_only()
+    if deny:
+        return deny
+
     old_password = request.form.get("old_password") or ""
     new_password = request.form.get("password") or ""
-    new_dpass = request.form.get("d_pass") or ""
+    new_dpass    = request.form.get("d_pass") or ""
 
     if not verify_password(user.password_hash, old_password):
         flash("Current password is incorrect.", "error")
@@ -1056,13 +1085,14 @@ def password_change():
     if not ok_p:
         flash(msg_p, "error")
         return redirect(url_for("password_change"))
+
     ok_d, msg_d = validate_password(new_dpass, username=user.username)
     if not ok_d:
         flash(f"Destruction password: {msg_d}", "error")
         return redirect(url_for("password_change"))
 
     user.password_hash = hash_password(new_password)
-    user.dpass_hash = hash_password(new_dpass)
+    user.dpass_hash    = hash_password(new_dpass)
     user.force_password_change = False
     db.session.commit()
     flash("Password updated.", "success")

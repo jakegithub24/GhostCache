@@ -1,43 +1,66 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}GhostCache{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}GhostCache{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% block head %}{% endblock %}
 </head>
 <body>
-    <header>
-        <h1>GhostCache</h1>
-        <nav>
-            {% if session.username %}
-                <a href="{{ url_for('index') }}">Home</a>
-                <a href="{{ url_for('search_users') }}">Search</a>
-                <a href="{{ url_for('list_files') }}">Files</a>
-                <a href="{{ url_for('logout') }}">Logout</a>
-            {% else %}
-                <a href="{{ url_for('login') }}">Login</a>
-                <a href="{{ url_for('register') }}">Register</a>
-            {% endif %}
-        </nav>
-    </header>
 
-    <main>
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                <div class="messages">
-                    {% for category, msg in messages %}
-                        <div class="message {{ category }}">{{ msg }}</div>
-                    {% endfor %}
-                </div>
-            {% endif %}
-        {% endwith %}
+<!-- Skip to main content for keyboard/screen reader users -->
+<a class="skip-link" href="#main-content">skip to content</a>
 
-        {% block content %}{% endblock %}
-    </main>
+<header>
+  <div class="header-inner">
+    <a class="site-logo" href="{{ url_for('index') }}">
+      GhostCache<span class="logo-cursor"></span>
+    </a>
+    <nav aria-label="main navigation">
+      {% if session.username %}
+        <a href="{{ url_for('index') }}"
+           {% if request.endpoint == 'index' %}aria-current="page"{% endif %}>home</a>
+        <a href="{{ url_for('list_connections') }}"
+           {% if request.endpoint in ('list_connections','accept_connection','deny_connection') %}aria-current="page"{% endif %}>connections</a>
+        <a href="{{ url_for('list_files') }}"
+           {% if request.endpoint in ('list_files','upload_file','download_file') %}aria-current="page"{% endif %}>files</a>
+        <a href="{{ url_for('search_users') }}"
+           {% if request.endpoint == 'search_users' %}aria-current="page"{% endif %}>search</a>
+        {% if session.get('is_admin') %}
+          <a href="{{ url_for('admin_index') }}"
+             {% if 'admin' in (request.endpoint or '') %}aria-current="page"{% endif %}>admin</a>
+        {% endif %}
+      {% endif %}
+    </nav>
+    <div class="nav-right">
+      {% if session.username %}
+        <div class="nav-badge">signed in as <strong>{{ session.username }}</strong></div>
+        <a href="{{ url_for('logout') }}" class="btn btn-ghost btn-sm">logout</a>
+      {% else %}
+        <a href="{{ url_for('login') }}"    class="btn btn-ghost btn-sm">login</a>
+        <a href="{{ url_for('register') }}" class="btn btn-primary btn-sm">register</a>
+      {% endif %}
+    </div>
+  </div>
+</header>
 
-    <footer>
-        <small>&copy; 2026 GhostCache</small>
-    </footer>
+<div class="flash-zone" role="alert" aria-live="polite">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, msg in messages %}
+      <div class="message {{ category }}">{{ msg }}</div>
+    {% endfor %}
+  {% endwith %}
+</div>
+
+<main id="main-content">
+  {% block content %}{% endblock %}
+</main>
+
+<footer>
+  &copy; 2026 GhostCache &nbsp;&middot;&nbsp; encrypted &middot; ephemeral
+</footer>
+
+{% block scripts %}{% endblock %}
 </body>
 </html>

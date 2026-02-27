@@ -1,15 +1,32 @@
 {% extends "base.html" %}
-
-{% block title %}Search Users{% endblock %}
+{% block title %}Search Users — GhostCache{% endblock %}
 
 {% block content %}
-    <h2>Search for users</h2>
-    <form method="get" action="{{ url_for('search_users') }}">
-        <input type="text" name="q" value="{{ query }}" placeholder="username">
-        <button type="submit">Search</button>
-    </form>
-    {% if results %}
-        <ul>
+<div class="page-hd">
+  <div>
+    <h2>search <span>users</span></h2>
+    <p>find visible, approved accounts</p>
+  </div>
+</div>
+
+<div style="max-width:480px; margin-bottom:32px;">
+  <form method="get" action="{{ url_for('search_users') }}" style="display:flex; gap:8px;">
+    <input type="text" name="q" value="{{ query }}"
+           placeholder="search by username…" autofocus style="flex:1;">
+    <button type="submit" class="btn btn-primary">search</button>
+  </form>
+</div>
+
+{% if results %}
+<div class="card">
+  <div class="card-head">
+    <span class="card-title">results</span>
+    <span class="badge badge-cyan">{{ results|length }}</span>
+  </div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>username</th><th>action</th></tr></thead>
+      <tbody>
         {% for u in results %}
             <li>{{ u.username }}{% if u.visibility=='hidden' %} (hidden){% endif %}
                 {% if u.username == query %}
@@ -21,8 +38,11 @@
                 {% endif %}
             </li>
         {% endfor %}
-        </ul>
-    {% elif query %}
-        <p>No users found matching '{{ query }}'</p>
-    {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% elif query %}
+<div class="empty-state">no users found matching <span class="text-acid">'{{ query }}'</span></div>
+{% endif %}
 {% endblock %}

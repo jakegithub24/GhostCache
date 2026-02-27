@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Approval Pending — GhostCache{% endblock %}
+
+{% block content %}
+<div style="max-width:480px; margin:80px auto 0; text-align:center;">
+
+  <div style="font-size:48px; margin-bottom:20px;">⏳</div>
+
+  <h2 style="font-family:var(--sans); font-weight:800; font-size:24px; letter-spacing:-0.5px; color:var(--text); margin-bottom:12px;">
+    Approval Pending
+  </h2>
+
+  <p class="text-dim" style="font-size:14px; line-height:1.7; margin-bottom:32px;">
+    Your registration has been submitted.<br>
+    An admin will review and approve your account shortly.<br>
+    Check back again in a little while.
+  </p>
+
+  <div style="background:var(--bg2); border:1px solid var(--border); border-radius:var(--r); padding:16px 20px; margin-bottom:28px; text-align:left;">
+    <div class="text-xs text-dim" style="text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;">// your registration</div>
+    <div class="text-sm">
+      username: <span class="text-acid">{{ username }}</span>
+    </div>
+    <div class="text-xs text-dim" style="margin-top:6px;">
+      status: <span class="badge badge-amber" style="margin-left:4px;">pending admin review</span>
+    </div>
+  </div>
+
+  <a href="{{ url_for('logout') }}" class="btn btn-ghost">logout</a>
+</div>
+{% endblock %}

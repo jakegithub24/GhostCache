@@ -1,21 +1,94 @@
 {% extends "base.html" %}
-
-{% block title %}Register - GhostCache{% endblock %}
+{% block title %}Register — GhostCache{% endblock %}
 
 {% block content %}
-    <h2>Create an account</h2>
-    <form method="post" action="{{ url_for('register') }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <label for="username">Username</label>
-        <input type="text" name="username" id="username" required>
+<div style="max-width:460px; margin:48px auto 0;">
+  <div style="text-align:center; margin-bottom:28px;">
+    <div style="font-family:var(--sans); font-weight:800; font-size:22px; letter-spacing:-0.5px;">Request Access</div>
+    <div class="text-dim text-sm" style="margin-top:6px;">admin approval required before entry</div>
+  </div>
 
-        <label for="password">Password</label>
-        <input type="password" name="password" id="password" required>
+  <div class="form-card">
+    <!-- Collapsible password rules — CSS only via <details> -->
+    <details style="margin-bottom:20px;">
+      <summary>// password requirements</summary>
+      <div class="details-body">
+        <div>— at least 8 characters</div>
+        <div>— uppercase + lowercase + digit + special character</div>
+        <div>— must not contain your username</div>
+        <div>— no common passwords</div>
+      </div>
+    </details>
 
-        <label for="d_pass">Destruction password</label>
-        <input type="password" name="d_pass" id="d_pass" required>
+    <form method="post" action="{{ url_for('register') }}" autocomplete="off" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-        <button type="submit">Register</button>
+      <div class="form-group">
+        <label for="username" class="required">username</label>
+        <input type="text" name="username" id="username"
+               required autofocus
+               placeholder="choose_a_handle"
+               autocomplete="off"
+               aria-describedby="username-hint"
+               minlength="1" maxlength="15"
+               pattern="[a-z][a-z0-9_]{0,14}"
+               title="1–15 chars, lowercase letters/digits/underscore, must start with a letter">
+        <span class="field-hint" id="username-hint">// 1–15 chars · a–z 0–9 _ · must start with a letter</span>
+      </div>
+
+      <div class="form-group">
+        <label for="password" class="required">login password</label>
+        <div class="pass-wrap">
+          <input type="password" name="password" id="password"
+                 required
+                 placeholder="••••••••"
+                 autocomplete="new-password"
+                 aria-describedby="password-hint"
+                 minlength="8"
+                 pattern="(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).{8,}"
+                 title="8+ chars with uppercase, lowercase, digit, and special character">
+        </div>
+        <div class="pass-strength" aria-hidden="true"></div>
+        <span class="field-hint" id="password-hint">// must include upper, lower, digit, special char</span>
+      </div>
+
+      <div style="border-top:1px solid var(--border); margin:22px 0 16px; position:relative;">
+        <span style="position:absolute;top:-9px;left:0;background:var(--bg2);padding:0 8px;font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-faint);">destruction password</span>
+      </div>
+
+      <!-- Collapsible destruction password warning -->
+      <details open style="margin-bottom:16px; border-color:rgba(255,59,92,0.25);">
+        <summary style="color:var(--red);">⚠ read before continuing</summary>
+        <div class="details-body" style="color:var(--text-dim);">
+          Entering this password at login will <strong style="color:var(--red);">permanently delete</strong>
+          your account and all data — instantly and irreversibly. Store it somewhere safe and separate.
+        </div>
+      </details>
+
+      <div class="form-group">
+        <label for="d_pass" class="required">destruction password</label>
+        <div class="pass-wrap">
+          <input type="password" name="d_pass" id="d_pass"
+                 required
+                 placeholder="••••••••"
+                 autocomplete="new-password"
+                 aria-describedby="dpass-hint"
+                 minlength="8"
+                 pattern="(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).{8,}"
+                 title="8+ chars with uppercase, lowercase, digit, and special character">
+        </div>
+        <div class="pass-strength" aria-hidden="true"></div>
+        <span class="field-hint" id="dpass-hint">// must be different from your login password</span>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px;">
+        submit registration →
+      </button>
     </form>
-    <p>Already have an account? <a href="{{ url_for('login') }}">Log in here</a>.</p>
+  </div>
+
+  <p class="text-center text-sm text-dim" style="margin-top:18px;">
+    already registered? <a href="{{ url_for('login') }}">sign in</a>
+  </p>
+</div>
 {% endblock %}
