@@ -1,19 +1,31 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Connections for {{ user.username }}</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-  </head>
-  <body>
-    <h1>Connections for {{ user.username }}</h1>
-    <ul>
-      {% for c in connections %}
-        <li>{{ c.other }} — {{ c.status }}</li>
-      {% else %}
-        <li>No connections.</li>
-      {% endfor %}
-    </ul>
-    <p><a href="/admin/manage_users">Back</a></p>
-  </body>
-</html>
+{% extends "base.html" %}
+{% block title %}Connections — Admin{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div>
+    <h2>connections for <span>{{ user.username }}</span></h2>
+  </div>
+  <a href="{{ url_for('admin_manage_users') }}" class="btn btn-ghost btn-sm">← back</a>
+</div>
+
+{% if connections %}
+<div class="card">
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>other</th><th>status</th></tr></thead>
+      <tbody>
+        {% for c in connections %}
+        <tr>
+          <td>{{ c.other }}</td>
+          <td>{{ c.status }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="empty-state">No connections.</div>
+{% endif %}
+{% endblock %}

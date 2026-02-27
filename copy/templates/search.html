@@ -28,15 +28,23 @@
       <thead><tr><th>username</th><th>action</th></tr></thead>
       <tbody>
         {% for u in results %}
-            <li>{{ u.username }}{% if u.visibility=='hidden' %} (hidden){% endif %}
-                {% if u.username == query %}
-                <form method="post" action="{{ url_for('send_connection_request') }}" style="display:inline;">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="hidden" name="username" value="{{ u.username }}">
-                    <button type="submit">Connect</button>
-                </form>
-                {% endif %}
-            </li>
+        <tr>
+          <td>
+            <span class="text-acid">{{ u.username }}</span>
+            {% if u.visibility=='hidden' %}
+              <span class="badge badge-dim" style="margin-left:6px;">hidden</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if u.username == query %}
+            <form method="post" action="{{ url_for('send_connection_request') }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="username" value="{{ u.username }}">
+              <button class="btn btn-primary btn-sm">connect</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
         {% endfor %}
       </tbody>
     </table>

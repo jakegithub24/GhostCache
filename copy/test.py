@@ -207,11 +207,14 @@ class RouteTest(unittest.TestCase):
         with app.app_context():
             admin = User.query.filter_by(username='admin').first()
             alice = User.query.filter_by(username='alice').first()
+            # grab ids now so we can reuse outside the context
+            admin_id = admin.id
+            alice_id = alice.id
             # ensure both have signing keys
             self.assertTrue(admin.ed25519_priv_enc and admin.ed25519_pub_b64)
             self.assertTrue(alice.ed25519_priv_enc and alice.ed25519_pub_b64)
             # create connection between admin and alice
-            conn = Connection(sender_id=admin.id, receiver_id=alice.id, status='accepted')
+            conn = Connection(sender_id=admin_id, receiver_id=alice_id, status='accepted')
             chat_key = generate_fernet_key()
             conn.chat_key_enc_sender = encrypt_with_user_key(admin, chat_key)
             conn.chat_key_enc_receiver = encrypt_with_user_key(alice, chat_key)
@@ -219,11 +222,11 @@ class RouteTest(unittest.TestCase):
             db.session.commit()
         # admin sends a message
         self.login_as('admin')
-        s = self.client.post(f'/chat/{alice.id}', data={'message': 'hi from admin'}, follow_redirects=True)
+        s = self.client.post(f'/chat/{alice_id}', data={'message': 'hi from admin'}, follow_redirects=True)
         self.assertIn(s.status_code, (200, 302))
         # alice should see it
         self.login_as('alice')
-        r = self.client.get(f'/chat/{admin.id}')
+        r = self.client.get(f'/chat/{admin_id}')
         self.assertIn(b'hi from admin', r.data)
 
     def test_missing_keys_are_generated(self):
@@ -239,18 +242,22 @@ class RouteTest(unittest.TestCase):
             db.session.commit()
             charlie = User.query.filter_by(username='charlie').first()
             bob = User.query.filter_by(username='bob').first()
+            charlie_id = charlie.id
+            bob_id = bob.id
             # create connection
-            conn = Connection(sender_id=charlie.id, receiver_id=bob.id, status='accepted')
+            conn = Connection(sender_id=charlie_id, receiver_id=bob_id, status='accepted')
             chat_key = generate_fernet_key()
             conn.chat_key_enc_sender = encrypt_with_user_key(charlie, chat_key)
             conn.chat_key_enc_receiver = encrypt_with_user_key(bob, chat_key)
             db.session.add(conn)
             db.session.commit()
-        # charlie should not have keys initially
-        self.assertFalse(charlie.ed25519_priv_enc)
+        # charlie should not have keys initially (reload from DB to avoid detached instance)
+        with app.app_context():
+            fresh = User.query.filter_by(username='charlie').first()
+        self.assertFalse(fresh.ed25519_priv_enc)
         # now simulate charlie sending a message, which should trigger key gen
         self.login_as('charlie')
-        resp = self.client.post(f'/chat/{bob.id}', data={'message': 'hello bob'}, follow_redirects=True)
+        resp = self.client.post(f'/chat/{bob_id}', data={'message': 'hello bob'}, follow_redirects=True)
         self.assertIn(resp.status_code, (200, 302))
         # re-fetch charlie from db to check keys were stored
         with app.app_context():
@@ -442,7 +449,19 @@ class AdminTest(unittest.TestCase):
                 os.environ[k] = v
 
     def setUp(self):
+        # ensure a fresh database per-test to avoid cross-test pollution
+        with app.app_context():
+            db.drop_all()
+            db.create_all()
         self.client = app.test_client()
+
+    # reuse the login helper from RouteTest
+    def login_as(self, username):
+        with app.app_context():
+            user = User.query.filter_by(username=username).first()
+        with self.client.session_transaction() as sess:
+            sess['user_id'] = user.id
+            sess['username'] = user.username
 
     def test_admin_register_and_login(self):
         # initial access should redirect to registration (env cleared by setUpClass)
@@ -450,7 +469,9 @@ class AdminTest(unittest.TestCase):
         self.assertEqual(r.status_code, 302)
         self.assertIn('/admin/register', r.headers.get('Location', ''))
         # perform registration
-        r2 = self.client.post('/admin/register', data={'username': 'boss', 'password': 'pass', 'dpassword': 'dpass', 'master_key': 'mkey'}, follow_redirects=True)
+        # choose a password that satisfies the current policy rules
+        strong_pw = 'Password1!'
+        r2 = self.client.post('/admin/register', data={'username': 'boss', 'password': strong_pw, 'dpassword': strong_pw, 'master_key': 'mkey'}, follow_redirects=True)
         self.assertIn(r2.status_code, (200, 302))
         # registration should have created signing keys as well
         with app.app_context():
@@ -458,7 +479,7 @@ class AdminTest(unittest.TestCase):
             self.assertIsNotNone(a)
             self.assertTrue(a.ed25519_pub_b64 and a.ed25519_priv_enc)
         # now login as admin
-        r3 = self.client.post('/login', data={'username': 'boss', 'password': 'pass'}, follow_redirects=True)
+        r3 = self.client.post('/login', data={'username': 'boss', 'password': strong_pw}, follow_redirects=True)
         self.assertIn(r3.status_code, (200, 302))
 
         # create a second normal user and establish a chat connection so the
@@ -493,9 +514,11 @@ class AdminTest(unittest.TestCase):
                        approved=True)
             db.session.add(jim)
             db.session.commit()
+            jim_id = jim.id
             # add connection and chat key
             boss = User.query.filter_by(username='boss').first()
-            conn = Connection(sender_id=boss.id, receiver_id=jim.id, status='accepted')
+            boss_id = boss.id
+            conn = Connection(sender_id=boss_id, receiver_id=jim_id, status='accepted')
             ck = generate_fernet_key()
             conn.chat_key_enc_sender = encrypt_with_user_key(boss, ck)
             conn.chat_key_enc_receiver = encrypt_with_user_key(jim, ck)
@@ -503,11 +526,11 @@ class AdminTest(unittest.TestCase):
             db.session.commit()
         # boss should be able to send a message
         self.login_as('boss')
-        rmsg = self.client.post(f'/chat/{jim.id}', data={'message': 'hi jim'}, follow_redirects=True)
+        rmsg = self.client.post(f'/chat/{jim_id}', data={'message': 'hi jim'}, follow_redirects=True)
         self.assertIn(rmsg.status_code, (200, 302))
         # verify jim can read it
         self.login_as('jim')
-        rview = self.client.get(f'/chat/{boss.id}')
+        rview = self.client.get(f'/chat/{boss_id}')
         self.assertIn(b'hi jim', rview.data)
 
     def test_manage_users_page(self):

@@ -1,45 +1,71 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Manage Users</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-  </head>
-  <body>
-    <h1>Manage Users</h1>
-    <h2>Visible users</h2>
-    <ul>
-      {% for u in visible %}
-        <li>{{ u.username }}
-          <a href="/admin/user/{{ u.id }}/connections">Connections</a>
-          <form method="post" action="/admin/delete_user/{{ u.id }}" style="display:inline">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input name="confirm" placeholder="DELETE" required>
-            <input name="auth" type="password" placeholder="admin pwd or MASTER_KEY" required>
-            <button type="submit">Delete</button>
-          </form>
-        </li>
-      {% else %}
-        <li>No visible users.</li>
-      {% endfor %}
-    </ul>
+{% extends "base.html" %}
+{% block title %}Manage Users — Admin{% endblock %}
 
-    <h2>Hidden users</h2>
-    <ul>
-      {% for u in hidden %}
-        <li>{{ u.username }}
-          <a href="/admin/user/{{ u.id }}/connections">Connections</a>
-          <form method="post" action="/admin/delete_user/{{ u.id }}" style="display:inline">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input name="confirm" placeholder="DELETE" required>
-            <input name="auth" type="password" placeholder="admin pwd or MASTER_KEY" required>
-            <button type="submit">Delete</button>
-          </form>
-        </li>
-      {% else %}
-        <li>No hidden users.</li>
-      {% endfor %}
-    </ul>
-    <p><a href="/admin">Back</a></p>
-  </body>
-</html>
+{% block content %}
+<div class="page-hd">
+  <div>
+    <h2>manage <span>users</span></h2>
+    <p>view and administer existing accounts</p>
+  </div>
+  <a href="{{ url_for('admin_index') }}" class="btn btn-ghost btn-sm">← admin</a>
+</div>
+
+{% if visible %}
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-head"><span class="card-title">visible users</span></div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>username</th><th>connections</th><th>action</th></tr></thead>
+      <tbody>
+        {% for u in visible %}
+        <tr>
+          <td>{{ u.username }}</td>
+          <td><a href="{{ url_for('admin_user_edit', user_id=u.id) }}" class="btn btn-ghost btn-sm">edit</a></td>
+          <td>
+            <form method="post" action="{{ url_for('admin_delete_user', user_id=u.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input name="confirm" placeholder="DELETE" required style="width:80px;">
+              <input name="auth" type="password" placeholder="admin pwd" required style="width:100px;">
+              <button class="btn btn-danger btn-sm danger">delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="empty-state">No visible users.</div>
+{% endif %}
+
+{% if hidden %}
+<div class="card">
+  <div class="card-head"><span class="card-title">hidden users</span></div>
+  <div class="tbl-wrap">
+    <table class="tbl">
+      <thead><tr><th>username</th><th>connections</th><th>action</th></tr></thead>
+      <tbody>
+        {% for u in hidden %}
+        <tr>
+          <td>{{ u.username }}</td>
+          <td><a href="{{ url_for('admin_user_edit', user_id=u.id) }}" class="btn btn-ghost btn-sm">edit</a></td>
+          <td>
+            <form method="post" action="{{ url_for('admin_delete_user', user_id=u.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input name="confirm" placeholder="DELETE" required style="width:80px;">
+              <input name="auth" type="password" placeholder="admin pwd" required style="width:100px;">
+              <button class="btn btn-danger btn-sm danger">delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="empty-state">No hidden users.</div>
+{% endif %}
+
+{% endblock %}

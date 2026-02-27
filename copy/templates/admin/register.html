@@ -1,19 +1,41 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Register Admin</title>
-    <link rel="stylesheet" href="/static/css/style.css">
-  </head>
-  <body>
-    <h1>Admin Registration</h1>
-    <form method="post">
+{% extends "base.html" %}
+{% block title %}Admin Registration{% endblock %}
+
+{% block content %}
+<div style="max-width:460px; margin:48px auto 0;">
+  <div style="text-align:center; margin-bottom:28px;">
+    <div style="font-family:var(--sans); font-weight:800; font-size:22px; letter-spacing:-0.5px;">Admin Registration</div>
+    <div class="text-dim text-sm" style="margin-top:6px;">create the initial administrator account</div>
+  </div>
+
+  <div class="form-card">
+    <form method="post" novalidate>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <label>Username</label><input name="username" required><br>
-      <label>Password</label><input type="password" name="password" required><br>
-      <label>Destruction password</label><input type="password" name="d_password" required><br>
-      <label>Master key</label><input type="password" name="master_key" required><br>
-      <button type="submit">Create admin account</button>
+
+      <div class="form-group">
+        <label for="username" class="required">username</label>
+        <input type="text" name="username" id="username" required autofocus autocomplete="off">
+      </div>
+
+      <div class="form-group">
+        <label for="password" class="required">password</label>
+        <input type="password" name="password" id="password" required placeholder="••••••••">
+      </div>
+
+      <div class="form-group">
+        <label for="d_password" class="required">destruction password</label>
+        <input type="password" name="d_password" id="d_password" required placeholder="••••••••">
+      </div>
+
+      <div class="form-group">
+        <label for="master_key" class="required">master key</label>
+        <input type="password" name="master_key" id="master_key" required placeholder="••••••••">
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px;">
+        create admin account →
+      </button>
     </form>
-  </body>
-</html>
+  </div>
+</div>
+{% endblock %}
