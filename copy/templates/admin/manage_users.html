@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Manage Users</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+  </head>
+  <body>
+    <h1>Manage Users</h1>
+    <h2>Visible users</h2>
+    <ul>
+      {% for u in visible %}
+        <li>{{ u.username }}
+          <a href="/admin/user/{{ u.id }}/connections">Connections</a>
+          <form method="post" action="/admin/delete_user/{{ u.id }}" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input name="confirm" placeholder="DELETE" required>
+            <input name="auth" type="password" placeholder="admin pwd or MASTER_KEY" required>
+            <button type="submit">Delete</button>
+          </form>
+        </li>
+      {% else %}
+        <li>No visible users.</li>
+      {% endfor %}
+    </ul>
+
+    <h2>Hidden users</h2>
+    <ul>
+      {% for u in hidden %}
+        <li>{{ u.username }}
+          <a href="/admin/user/{{ u.id }}/connections">Connections</a>
+          <form method="post" action="/admin/delete_user/{{ u.id }}" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input name="confirm" placeholder="DELETE" required>
+            <input name="auth" type="password" placeholder="admin pwd or MASTER_KEY" required>
+            <button type="submit">Delete</button>
+          </form>
+        </li>
+      {% else %}
+        <li>No hidden users.</li>
+      {% endfor %}
+    </ul>
+    <p><a href="/admin">Back</a></p>
+  </body>
+</html>

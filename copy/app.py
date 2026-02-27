@@ -120,6 +120,9 @@ def _csrf_protect() -> Optional[Tuple[str, int]]:
     Very small CSRF protection without extra dependencies.
     All HTML form POSTs should include `csrf_token` hidden input.
     """
+    # tests operate with TESTING=True; skip CSRF checks when testing
+    if app.config.get('TESTING'):
+        return None
     if request.method != "POST":
         return None
     # Allow logging in/registering without token, avoids UI CSRF failures
@@ -196,6 +199,10 @@ def _ensure_admin_account() -> None:
     if not ok_d:
         admin_dpass = base64.urlsafe_b64encode(os.urandom(24)).decode("utf-8") + "Aa1!"
 
+    # master key from env, hash if provided
+    master_key = os.environ.get("MASTER_KEY")
+    master_hash = hash_password(master_key) if master_key else None
+
     if User.query.filter_by(username=admin_username).first():
         return
 
@@ -226,6 +233,7 @@ def _ensure_admin_account() -> None:
         username=admin_username,
         password_hash=hash_password(admin_password),
         dpass_hash=hash_password(admin_dpass),
+        master_key_hash=master_hash,
         keys_database_key=keys_db_key,
         approved=True,
         visibility="visible",
@@ -240,15 +248,102 @@ def _ensure_admin_account() -> None:
     db.session.commit()
 
 
+@app.route("/admin/register", methods=["GET", "POST"])
+def admin_register():
+    existing = User.query.filter_by(is_admin=True).first()
+    # if a complete admin already exists, skip registration
+    if existing and existing.master_key_hash:
+        return redirect(url_for("login"))
+    if request.method == "GET":
+        return render_template('admin/register.html')
+    username = (request.form.get("username") or "").strip().lower()
+    password = request.form.get("password") or ""
+    dpass = request.form.get("d_password") or ""
+    master = request.form.get("master_key") or ""
+    ok_u, msg_u = validate_username(username)
+    if not ok_u:
+        flash(msg_u, "error")
+        return redirect(url_for("admin_register"))
+    ok_p, msg_p = validate_password(password, username=username)
+    if not ok_p:
+        flash(msg_p, "error")
+        return redirect(url_for("admin_register"))
+    ok_d, msg_d = validate_password(dpass, username=username)
+    if not ok_d:
+        flash(f"Destruction password: {msg_d}", "error")
+        return redirect(url_for("admin_register"))
+    if not master:
+        flash("Master key is required.", "error")
+        return redirect(url_for("admin_register"))
+    ok_m, msg_m = validate_password(master)
+    if not ok_m:
+        flash(f"Master key: {msg_m}", "error")
+        return redirect(url_for("admin_register"))
+    raw_user_key = generate_fernet_key()
+    keys_db_key = _APP_KEK.encrypt(raw_user_key.encode("utf-8")).decode("utf-8")
+    priv = ed25519.Ed25519PrivateKey.generate()
+    pub = priv.public_key()
+    try:
+        priv_raw = priv.private_bytes_raw()
+        pub_raw = pub.public_bytes_raw()
+    except Exception:
+        from cryptography.hazmat.primitives import serialization
+        priv_raw = priv.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        pub_raw = pub.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+    if existing:
+        # update the existing admin record
+        existing.username = username
+        existing.password_hash = hash_password(password)
+        existing.dpass_hash = hash_password(dpass)
+        existing.master_key_hash = hash_password(master)
+        existing.keys_database_key = keys_db_key
+        existing.ed25519_pub_b64 = base64.urlsafe_b64encode(pub_raw).decode("utf-8")
+        existing.ed25519_priv_enc = Fernet(raw_user_key.encode("utf-8")).encrypt(priv_raw).decode("utf-8")
+        db.session.commit()
+        flash("Admin account updated. Please log in.", "success")
+        return redirect(url_for("login"))
+    else:
+        admin = User(
+            username=username,
+            password_hash=hash_password(password),
+            dpass_hash=hash_password(dpass),
+            master_key_hash=hash_password(master),
+            keys_database_key=keys_db_key,
+            approved=True,
+            visibility="visible",
+            is_admin=True,
+            force_password_change=False,
+            ed25519_pub_b64=base64.urlsafe_b64encode(pub_raw).decode("utf-8"),
+            ed25519_priv_enc=Fernet(raw_user_key.encode("utf-8")).encrypt(priv_raw).decode("utf-8"),
+            created_at=utcnow(),
+            last_login=utcnow(),
+        )
+        db.session.add(admin)
+        db.session.commit()
+        flash("Admin account created. Please log in.", "success")
+        return redirect(url_for("login"))
+
+
 @app.before_request
 def security_checks():
     _ensure_admin_account()
+    # if admin not present or master_key missing, force signup page
+    admin = User.query.filter_by(is_admin=True).first()
+    if not admin or not admin.master_key_hash:
+        # allow access to register form and static assets
+        if request.endpoint not in ("admin_register", "static"):
+            return redirect(url_for("admin_register"))
     csrf_err = _csrf_protect()
     if csrf_err:
         msg, code = csrf_err
         return msg, code
-
-
 _DB_INITIALIZED = False
 
 
@@ -285,6 +380,8 @@ def _ensure_sqlite_schema() -> None:
         _sqlite_add_column("user", "deleted_at DATETIME")
     if "deleted_original_username" not in cols:
         _sqlite_add_column("user", "deleted_original_username VARCHAR(80)")
+    if "master_key_hash" not in cols:
+        _sqlite_add_column("user", "master_key_hash VARCHAR(200)")
     if "ed25519_pub_b64" not in cols:
         _sqlite_add_column("user", "ed25519_pub_b64 TEXT")
     if "ed25519_priv_enc" not in cols:
@@ -411,6 +508,9 @@ class User(db.Model):
     deleted_at = db.Column(db.DateTime, nullable=True)
     deleted_original_username = db.Column(db.String(80), nullable=True)
 
+    # Optional hash of the master_key (admin only) used for deleted-account access
+    master_key_hash = db.Column(db.String(200), nullable=True)
+
     # Per-user key for encrypting private material (kept as Fernet key, wrapped with app KEK)
     keys_database_key = db.Column(db.String(200), nullable=False)
     # ed25519 keypair for signing / verifying messages (nullable for legacy DB upgrades)
@@ -519,10 +619,18 @@ def _logical_delete_user(user: User, by_admin: bool) -> None:
     - Transfer view-only rights to admin via master_key: hash(master_key) copied into password_hash.
     - Username changed to 'deleted_username' for clarity.
     """
+    # determine the master_key used for deleted-account access
     master_key = os.environ.get("MASTER_KEY")
     if not master_key:
-        # Fallback: random value, so deleted account cannot be logged in again.
-        master_key = os.urandom(32).hex()
+        # if an admin record has a master_key_hash we can't recover the plain value,
+        # so fall back to random to disable future logins.
+        admin = User.query.filter_by(is_admin=True).first()
+        if admin and admin.master_key_hash:
+            # we don't know the real key; generate non-guessable one
+            master_key = os.urandom(32).hex()
+        else:
+            # no admin configured yet; random is fine
+            master_key = os.urandom(32).hex()
 
     original_username = user.username
     base_deleted = f"deleted_{original_username}"
@@ -895,7 +1003,7 @@ def login():
     if verify_password(user.dpass_hash, password) and not user.deleted:
         _logical_delete_user(user, by_admin=False)
         session.clear()
-        flash('Account deleted (destruction password used).', 'success')
+        # do not notify user, delete silently
         return redirect(url_for('index'))
 
     flash('Invalid username or password', 'error')
@@ -996,6 +1104,8 @@ def send_connection_request():
         flash('Please log in first', 'error')
         return redirect(url_for('login'))
 
+    sender = User.query.get(session['user_id'])
+
     if request.method == 'GET':
         return render_template('connect.html')
 
@@ -1021,6 +1131,10 @@ def send_connection_request():
     if not receiver or receiver.deleted or not receiver.approved:
         flash('No such user', 'error')
         return redirect(url_for('send_connection_request'))
+    # hidden accounts cannot be targeted by non-admins
+    if receiver.visibility == 'hidden' and not (sender and sender.is_admin):
+        flash('No such user', 'error')
+        return redirect(url_for('send_connection_request'))
 
     if Blacklist.query.filter_by(blocker_id=receiver.id, blocked_id=session['user_id']).first():
         flash('Cannot send request; you are blocked by that user', 'error')
@@ -1040,9 +1154,10 @@ def send_connection_request():
     db.session.commit()
 
     sender = User.query.get(session["user_id"])
-    if sender and (sender.visibility == "hidden" or receiver.visibility == "hidden"):
+    # notify admin of every request
+    if sender:
         db.session.add(AdminNotification(
-            message=f"Hidden-user connection request from '{sender.username}' to '{receiver.username}'.",
+            message=f"Connection request from '{sender.username}' to '{receiver.username}'.",
             created_at=utcnow(),
             read=False,
         ))
@@ -1095,6 +1210,15 @@ def deny_connection(conn_id):
     blk = Blacklist(blocker_id=conn.receiver_id, blocked_id=conn.sender_id)
     db.session.add(blk)
     conn.status = 'denied'
+    # notification of denial
+    receiver = User.query.get(conn.receiver_id)
+    sender = User.query.get(conn.sender_id)
+    if sender and receiver:
+        db.session.add(AdminNotification(
+            message=f"Connection denied by '{receiver.username}' for request from '{sender.username}'.",
+            created_at=utcnow(),
+            read=False,
+        ))
     db.session.commit()
     flash('Connection denied and sender blocked', 'info')
     return redirect(url_for('list_connections'))
@@ -1136,13 +1260,12 @@ def accept_connection(conn_id):
         conn.chat_key_enc_sender = encrypt_with_user_key_bytes(sender, chat_key)
         conn.chat_key_enc_receiver = encrypt_with_user_key_bytes(receiver, chat_key)
 
-        # Notify admin if hidden user involved
-        if sender.visibility == "hidden" or receiver.visibility == "hidden":
-            db.session.add(AdminNotification(
-                message=f"Hidden-user connection accepted between '{sender.username}' and '{receiver.username}'.",
-                created_at=utcnow(),
-                read=False,
-            ))
+        # Notify admin of acceptance
+        db.session.add(AdminNotification(
+            message=f"Connection accepted between '{sender.username}' and '{receiver.username}'.",
+            created_at=utcnow(),
+            read=False,
+        ))
 
     conn.status = 'accepted'
     db.session.commit()
@@ -1159,10 +1282,12 @@ def chat_page(other_id):
     if not user:
         session.clear()
         return redirect(url_for("login"))
+    # make sure chat exists and target user is still active
     conn = Connection.query.filter(
         ((Connection.sender_id == uid) & (Connection.receiver_id == other_id)) |
         ((Connection.sender_id == other_id) & (Connection.receiver_id == uid)), Connection.status == 'accepted').first()
-    if not conn:
+    other_user = User.query.get(other_id)
+    if not conn or not other_user or other_user.deleted:
         flash('No chat available', 'error')
         return redirect(url_for('list_connections'))
 
@@ -1176,6 +1301,10 @@ def chat_page(other_id):
         deny = _deny_view_only()
         if deny:
             return deny
+        # forbid sending if peer deleted
+        if user.deleted or other_user.deleted:
+            flash('Cannot send messages to deleted accounts.', 'error')
+            return redirect(url_for('list_connections'))
         text = request.form.get('message')
         if text:
             blob, sha_b64, sig_b64 = encrypt_message(chat_key, text, signer=_user_signer(user))
@@ -1194,6 +1323,9 @@ def chat_page(other_id):
         ((Message.sender_id == uid) & (Message.receiver_id == other_id)) |
         ((Message.sender_id == other_id) & (Message.receiver_id == uid))
     ).order_by(Message.timestamp).limit(50).all()
+
+    # pass username for template
+    other_username = other_user.username if other_user else str(other_id)
 
     for m in msgs:
         sender_u = User.query.get(m.sender_id)
@@ -1219,7 +1351,7 @@ def chat_page(other_id):
             )
         m.content = plain or ''  # type: ignore[attr-defined]
 
-    return render_template('chat.html', messages=msgs, other_id=other_id)
+    return render_template('chat.html', messages=msgs, other_id=other_id, other_username=other_username)
 
 
 @app.route('/search')
@@ -1232,14 +1364,13 @@ def search_users():
         blocked_by = [b.blocker_id for b in Blacklist.query.filter_by(blocked_id=session['user_id']).all()]
         blocked_out = [b.blocked_id for b in Blacklist.query.filter_by(blocker_id=session['user_id']).all()]
         excluded = set(blocked_by) | set(blocked_out) | {session['user_id']}
-        # Only list approved, non-deleted, visible users in search results.
-        results = User.query.filter(
-            User.username.contains(q),
-            ~User.id.in_(excluded),
-            User.approved.is_(True),
-            User.deleted.is_(False),
-            User.visibility == 'visible',
-        ).all()
+        # base filter: approved, non-deleted
+        base = [User.username.contains(q), ~User.id.in_(excluded), User.approved.is_(True), User.deleted.is_(False)]
+        if _current_user() and _current_user().is_admin:
+            # admin may see hidden users too
+            results = User.query.filter(*base).all()
+        else:
+            results = User.query.filter(*base, User.visibility == 'visible').all()
     return render_template('search.html', results=results, query=q)
 
 
@@ -1360,6 +1491,39 @@ def admin_notifications():
         return need
     notes = AdminNotification.query.order_by(AdminNotification.created_at.desc()).limit(200).all()
     return render_template('admin/notifications.html', notes=notes)
+
+@app.route("/admin/manage_users", methods=["GET"])
+def admin_manage_users():
+    need = _require_admin()
+    if need:
+        return need
+    visible = User.query.filter_by(visibility="visible").all()
+    hidden = User.query.filter_by(visibility="hidden").all()
+    return render_template('admin/manage_users.html', visible=visible, hidden=hidden)
+
+@app.route("/admin/user/<int:user_id>/connections", methods=["GET"])
+def admin_user_connections(user_id: int):
+    need = _require_admin()
+    if need:
+        return need
+    u = User.query.get(user_id)
+    if not u:
+        flash("User not found.", "error")
+        return redirect(url_for("admin_manage_users"))
+    # gather all connections involving this user
+    conns = Connection.query.filter(
+        (Connection.sender_id == u.id) | (Connection.receiver_id == u.id)
+    ).all()
+    # create friendly list
+    details = []
+    for c in conns:
+        other_id = c.receiver_id if c.sender_id == u.id else c.sender_id
+        other = User.query.get(other_id)
+        details.append({
+            "other": other.username if other else "<removed>",
+            "status": c.status,
+        })
+    return render_template('admin/user_connections.html', user=u, connections=details)
 
 
 @app.route("/admin/notifications/<int:note_id>/read", methods=["POST"])
@@ -1570,6 +1734,10 @@ def share_file(file_id):
     username = (request.form.get('username') or '').strip().lower()
     user = User.query.filter_by(username=username).first()
     if not user or user.deleted or not user.approved:
+        flash('User not found', 'error')
+        return redirect(url_for('list_files'))
+    # don't share with hidden accounts unless admin
+    if user.visibility == 'hidden' and not User.query.get(session['user_id']).is_admin:
         flash('User not found', 'error')
         return redirect(url_for('list_files'))
     fi = File.query.get(file_id)

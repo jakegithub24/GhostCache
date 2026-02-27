@@ -39,7 +39,7 @@ python test.py
 - Register an account via the `/register` page, then login via `/login`.
 - Upload files at `/file/upload` (max 50MB default). Uploaded blobs are stored in the `uploads/` folder and a database record is created.
 - Manage connections at `/connect` and `/connections`. Accepting a connection generates keys for encrypted chat.
-- Chat is available at `/chat/<other_id>` and `/chat/send` (API) and polled at `/chat/poll`.
+- Chat is available at `/chat/<other_id>`; sending messages and viewing conversations happen on that page.
 
 ## Important API notes
 - Routes accept either traditional form-encoded requests (HTML forms) or JSON POST bodies.
@@ -60,9 +60,7 @@ curl -X POST -H "Content-Type: application/json" -d '{"username":"alice","passwo
 - `GET /connections` — list pending/accepted connections
 - `POST /connect/accept/<conn_id>` — accept connection (server side keys generated)
 - `POST /connect/deny/<conn_id>` — deny and block sender
-- `POST /chat/send` — send message via form or JSON (`receiver_id`, `message`)
-- `GET /chat/poll` — get queued messages for logged-in user
-- `GET,POST /chat/<int:other_id>` — chat page (GET) and send (POST)
+- `GET,POST /chat/<int:other_id>` — chat page (GET) and send message (POST)
 - `GET /search?q=...` — user search
 - `GET /files` — list files for user
 - `GET /file/<file_id>` — download file (requires permission)

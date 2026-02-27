@@ -11,12 +11,14 @@
     {% if results %}
         <ul>
         {% for u in results %}
-            <li>{{ u.username }} 
+            <li>{{ u.username }}{% if u.visibility=='hidden' %} (hidden){% endif %}
+                {% if u.username == query %}
                 <form method="post" action="{{ url_for('send_connection_request') }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="username" value="{{ u.username }}">
                     <button type="submit">Connect</button>
                 </form>
+                {% endif %}
             </li>
         {% endfor %}
         </ul>

@@ -66,7 +66,7 @@ High-level flow
 - Web UI and API endpoints are provided via Flask routes.
 - User registration creates a User record with Argon2-hashed passwords and a per-user Fernet key (`keys_database_key`) used to encrypt user-specific private values stored in the DB (for demo purposes).
 - Connections are represented by `Connection` records; acceptance triggers generation of RSA key pairs and a shared chat key encrypted for each participant.
-- Chat messages are stored encrypted (Fernet) in `Message.content` and delivered via `/chat/poll` for the recipient.
+- Chat messages are stored encrypted (Fernet) in `Message.content` and delivered by decrypting them when the chat page is loaded.
 - File uploads are encrypted with a generated Fernet key per upload; the blob written to disk is the encrypted payload and the key is shown to the uploader (keep safe).
 
 Database models (schema)
@@ -147,18 +147,9 @@ All input endpoints accept form-encoded data from HTML forms; JSON is also suppo
 - `POST /connect/deny/<int:conn_id>`
   - Must be receiver. Adds a `Blacklist` entry (blocker=receiver, blocked=sender) and sets connection status to `denied`.
 
-- `POST /chat/send`
-  - Requires authenticated session.
-  - Accepts either form or JSON with `receiver_id` and `message`.
-  - Validates there is an accepted `Connection` between sender and receiver. Uses the appropriate encrypted chat key stored in the connection (`chat_key_enc_sender` or `chat_key_enc_receiver`), decrypts it using `decrypt_with_user_key(user, ciphertext)`, then encrypts the message payload using Fernet and stores as `Message.content`.
-  - Returns JSON status `queued` and HTTP 201 on success.
-
-- `GET /chat/poll`
-  - Requires session. Returns JSON array of undelivered messages for the logged-in user (messages where `receiver_id == uid` and `delivered == False`). Decrypts each message using that user's copy of the chat key and marks messages delivered.
-
 - `GET/POST /chat/<int:other_id>`
   - GET: checks for an accepted connection; decrypts chat key and renders `chat.html` with decrypted messages.
-  - POST: sends message via same process as `/chat/send` (form-based in that handler path) and redirects back to chat page.
+  - POST: sends message using the chat page form and redirects back to the same page.
 
 - `GET /search?q=...`
   - Requires session. Returns template `search.html` with results of username substring match excluding users blocked by or blocking the current user.
@@ -199,7 +190,7 @@ Messaging / connection flow (detailed)
 2. B accepts through `/connect/accept/<id>`: server generates RSA keypairs for both sides and encrypts them with each user's `keys_database_key`.
 3. Server generates a symmetric chat key (Fernet) used to encrypt messages between A and B. The chat key is encrypted separately for A and for B and stored in the `Connection` record.
 4. When A sends a message to B, server picks the correct encrypted chat key for A to decrypt it (using A's `keys_database_key`) then uses the raw chat key to encrypt the message (Fernet) and saves the ciphertext in `Message.content`.
-5. When B polls with `/chat/poll`, server uses B's encrypted chat key to decrypt to raw key then decrypts stored messages for B and returns plaintext in JSON.
+5. When a user loads their chat page, the server uses the encrypted chat key stored on the connection record to decrypt any stored messages and render them in plaintext.
 
 Configuration and environment
 -----------------------------

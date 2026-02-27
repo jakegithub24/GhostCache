@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Connections for {{ user.username }}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+  </head>
+  <body>
+    <h1>Connections for {{ user.username }}</h1>
+    <ul>
+      {% for c in connections %}
+        <li>{{ c.other }} — {{ c.status }}</li>
+      {% else %}
+        <li>No connections.</li>
+      {% endfor %}
+    </ul>
+    <p><a href="/admin/manage_users">Back</a></p>
+  </body>
+</html>
