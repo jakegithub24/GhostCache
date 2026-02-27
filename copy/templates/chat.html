@@ -1,16 +1,17 @@
 {% extends "base.html" %}
-{% block title %}Chat — GhostCache{% endblock %}
+
+{% block title %}Chat with {{ other_username }}{% endblock %}
 
 {% block content %}
-<div class="chat-layout">
-
-  <div class="chat-header">
-    <div class="chat-peer">
-      <div class="chat-avatar" aria-hidden="true">{{ other_id }}</div>
-      <div>
-        <div class="chat-name">user #{{ other_id }}</div>
-        <div class="chat-enc-label">&#10003; end-to-end encrypted</div>
-      </div>
+    <h2>Chat with {{ other_username }}</h2>
+    <div class="chat-window">
+        {% for m in messages %}
+            <div class="msg {{ 'sent' if m.sender_id == session.user_id else 'recv' }}">
+                <span class="who">{{ 'You' if m.sender_id == session.user_id else other_username }}:</span>
+                <span class="text">{{ m.content }}</span>
+                <span class="ts">{{ m.timestamp }}</span>
+            </div>
+        {% endfor %}
     </div>
     <a href="{{ url_for('list_connections') }}" class="btn btn-ghost btn-sm">&larr; back</a>
   </div>
